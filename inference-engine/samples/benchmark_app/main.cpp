@@ -60,6 +60,7 @@ bool ParseAndCheckCommandLine(int argc, char* argv[]) {
     if (FLAGS_api != "async" && FLAGS_api != "sync") {
         throw std::logic_error("Incorrect API. Please set -api option to `sync` or `async` value.");
     }
+
     if (!FLAGS_hint.empty() && FLAGS_hint != "throughput" && FLAGS_hint != "tput" && FLAGS_hint != "latency") {
         throw std::logic_error("Incorrect performance hint. Please set -hint option to"
                                "either `throughput`(tput) or `latency' value.");
@@ -192,6 +193,12 @@ int main(int argc, char* argv[]) {
             slog::info << "CPU (MKLDNN) extensions is loaded " << FLAGS_l << slog::endl;
         }
 
+        // Set throughput when loading AUTO device if hint is empty.
+        if(FLAGS_d.find("AUTO") != std::string::npos && FLAGS_hint.empty())
+        {
+            FLAGS_hint = "throughput";
+        }
+
         // Load clDNN Extensions
         if ((FLAGS_d.find("GPU") != std::string::npos) && !FLAGS_c.empty()) {
             // Override config if command line parameter is specified
@@ -269,9 +276,13 @@ int main(int argc, char* argv[]) {
                 device_config[CONFIG_KEY(PERF_COUNT)] = CONFIG_VALUE(YES);
             } else {
                 // set to default value
-                device_config[CONFIG_KEY(PERF_COUNT)] = FLAGS_pc ? CONFIG_VALUE(YES) : CONFIG_VALUE(NO);
+                // Remove PERF_COUNT key as AUTO device doesn't support this key yet.
+                if(device.find("AUTO") == std::string::npos)
+                    device_config[CONFIG_KEY(PERF_COUNT)] = FLAGS_pc ? CONFIG_VALUE(YES) : CONFIG_VALUE(NO);
             }
-            perf_counts = (device_config.at(CONFIG_KEY(PERF_COUNT)) == CONFIG_VALUE(YES)) ? true : perf_counts;
+
+            if(device_config.count(CONFIG_KEY(PERF_COUNT)))
+                perf_counts = (device_config.at(CONFIG_KEY(PERF_COUNT)) == CONFIG_VALUE(YES)) ? true : perf_counts;
 
             // the rest are individual per-device settings (overriding the values set with perf modes)
             auto setThroughputStreams = [&]() {
