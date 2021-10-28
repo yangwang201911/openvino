@@ -164,6 +164,9 @@ void MultiDeviceInferencePlugin::SetConfig(const std::map<std::string, std::stri
         if (supported_configKeys.end() == std::find(supported_configKeys.begin(), supported_configKeys.end(), "PERF_COUNT")) {
             supported_configKeys.push_back("PERF_COUNT");
         }
+        if (supported_configKeys.end() == std::find(supported_configKeys.begin(), supported_configKeys.end(), "EXCLUSIVE_ASYNC_REQUESTS")) {
+            supported_configKeys.push_back("EXCLUSIVE_ASYNC_REQUESTS");
+        }
     }
     for (auto && kvp : config) {
         const auto& name = kvp.first;
