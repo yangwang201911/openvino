@@ -276,9 +276,7 @@ int main(int argc, char* argv[]) {
                 device_config[CONFIG_KEY(PERF_COUNT)] = CONFIG_VALUE(YES);
             } else {
                 // set to default value
-                // Remove PERF_COUNT key as AUTO device doesn't support this key yet.
-                if(device.find("AUTO") == std::string::npos)
-                    device_config[CONFIG_KEY(PERF_COUNT)] = FLAGS_pc ? CONFIG_VALUE(YES) : CONFIG_VALUE(NO);
+                device_config[CONFIG_KEY(PERF_COUNT)] = FLAGS_pc ? CONFIG_VALUE(YES) : CONFIG_VALUE(NO);
             }
 
             if(device_config.count(CONFIG_KEY(PERF_COUNT)))
