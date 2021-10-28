@@ -161,6 +161,11 @@ InferenceEngine::Parameter MultiDeviceInferencePlugin::GetConfig(const std::stri
 
 void MultiDeviceInferencePlugin::SetConfig(const std::map<std::string, std::string> & config) {
     const auto perf_hints_configs = PerfHintsConfig::SupportedKeys();
+    if (GetName() == "AUTO") {
+        if (supported_configKeys.end() == std::find(supported_configKeys.begin(), supported_configKeys.end(), "PERF_COUNT")) {
+            supported_configKeys.push_back("PERF_COUNT");
+        }
+    }
     for (auto && kvp : config) {
         const auto& name = kvp.first;
         if (supported_configKeys.end() != std::find(supported_configKeys.begin(), supported_configKeys.end(), name)) {
