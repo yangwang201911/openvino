@@ -159,6 +159,11 @@ TEST_P(IncorrectConfigTests, CanNotLoadNetworkWithIncorrectConfig) {
                  InferenceEngine::Exception);
 }
 
+TEST_P(IncorrectConfigTests, GetConfigWithIncorrectKey) {
+    auto iter = configuration.begin();
+    ASSERT_THROW(ie->GetConfig(targetDevice, iter->first), InferenceEngine::Exception);
+}
+
 TEST_P(IncorrectConfigSingleOptionTests, CanNotGetConfigWithIncorrectConfig) {
     ASSERT_NO_THROW(ie->GetMetric(targetDevice, METRIC_KEY(SUPPORTED_CONFIG_KEYS)));
     ASSERT_THROW(ie->GetConfig(targetDevice, key), InferenceEngine::Exception);
