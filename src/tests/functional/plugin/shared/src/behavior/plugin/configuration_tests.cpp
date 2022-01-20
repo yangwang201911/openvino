@@ -160,6 +160,9 @@ TEST_P(IncorrectConfigTests, CanNotLoadNetworkWithIncorrectConfig) {
 }
 
 TEST_P(IncorrectConfigTests, GetConfigWithIncorrectKey) {
+    // Just for lines coverage of GetConfig in AUTO Plugin.
+    if (targetDevice != "AUTO")
+        GTEST_SKIP();
     auto iter = configuration.begin();
     ASSERT_THROW(ie->GetConfig(targetDevice, iter->first), InferenceEngine::Exception);
 }
