@@ -201,7 +201,7 @@ void AutoSchedule::init(const ScheduleContext::Ptr& sContext) {
             auto* contextPtr = &_loadContext[i];
             auto modelPath = _autoSContext->_modelPath;
             auto network = _autoSContext->_network;
-            _loadContext[i].task = [this, contextPtr, modelPath, network, isCumulative]() mutable {
+            _loadContext[i].task = [this, contextPtr, modelPath, network, isActualDevCPU, isCumulative]() mutable {
                 TryToLoadNetWork(*contextPtr, modelPath, network);
                 if (contextPtr->isLoadSuccess) {
                     if (contextPtr->workName.empty()) {
@@ -217,6 +217,16 @@ void AutoSchedule::init(const ScheduleContext::Ptr& sContext) {
                     contextPtr->isAlready = true;
                     auto& deviceName = contextPtr->deviceInfo.deviceName;
                     LOG_INFO_TAG("device:%s loading Network finished", deviceName.c_str());
+                    {
+                        std::lock_guard<std::mutex> lock(_autoSContext->_confMutex);
+                        if (!isCumulative) {
+                            auto execution_device = _autoSContext->_plugin->GetConfig(ov::execution_devices.name(), {});
+                            if (deviceName == "CPU" && !isActualDevCPU && execution_device.empty())
+                                _autoSContext->_plugin->SetConfig({{ov::execution_devices.name(), "(CPU)"}});
+                            else
+                                _autoSContext->_plugin->SetConfig({{ov::execution_devices.name(), deviceName}});
+                        }
+                    }
                     if (!isCumulative) {
                         auto supported_config_keys =
                             _autoSContext->_core->GetMetric(deviceName, METRIC_KEY(SUPPORTED_CONFIG_KEYS))

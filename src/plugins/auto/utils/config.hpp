@@ -46,6 +46,8 @@ struct PluginConfig {
                 else
                     IE_THROW() << "Unsupported config value: " << kvp.second
                             << " for key: " << kvp.first;
+            } else if (kvp.first == ov::execution_devices.name()) {
+                _executionDevices = kvp.second;
             } else if (kvp.first == ov::log::level.name()) {
                 _logLevel = kvp.second;
                 auto success = setLogLevel(_logLevel);
@@ -155,6 +157,8 @@ struct PluginConfig {
         } else {
             _keyConfigMap[PluginConfigParams::KEY_PERF_COUNT] = PluginConfigParams::NO;
         }
+        if (!_executionDevices.empty())
+            _keyConfigMap[PluginConfigParams::KEY_EXECUTION_DEVICES] = _executionDevices;
         if (_exclusiveAsyncRequests)
             _keyConfigMap[PluginConfigParams::KEY_EXCLUSIVE_ASYNC_REQUESTS] = PluginConfigParams::YES;
         else
@@ -200,6 +204,7 @@ struct PluginConfig {
     int _modelPriority;
     bool _deviceBindBuffer;
     std::string _logLevel;
+    std::string _executionDevices = "";
     PerfHintsConfig  _perfHintsConfig;
     std::map<std::string, std::string> _passThroughConfig;
     std::map<std::string, std::string> _keyConfigMap;
