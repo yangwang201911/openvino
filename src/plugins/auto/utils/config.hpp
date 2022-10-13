@@ -157,8 +157,6 @@ struct PluginConfig {
         } else {
             _keyConfigMap[PluginConfigParams::KEY_PERF_COUNT] = PluginConfigParams::NO;
         }
-        if (!_executionDevices.empty())
-            _keyConfigMap[PluginConfigParams::KEY_EXECUTION_DEVICES] = _executionDevices;
         if (_exclusiveAsyncRequests)
             _keyConfigMap[PluginConfigParams::KEY_EXCLUSIVE_ASYNC_REQUESTS] = PluginConfigParams::YES;
         else
@@ -177,6 +175,7 @@ struct PluginConfig {
         _keyConfigMap[PluginConfigParams::KEY_PERFORMANCE_HINT_NUM_REQUESTS] = std::to_string(_perfHintsConfig.ovPerfHintNumRequests);
 
         _keyConfigMap[ov::device::priorities.name()] = _devicePriority;
+        _keyConfigMap[PluginConfigParams::KEY_EXECUTION_DEVICES] = _executionDevices;
 
         if (_disableAutoBatching)
             _keyConfigMap[ov::hint::allow_auto_batching.name()] = PluginConfigParams::NO;
