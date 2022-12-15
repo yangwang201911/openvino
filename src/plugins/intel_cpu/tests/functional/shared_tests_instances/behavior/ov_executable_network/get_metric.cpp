@@ -127,6 +127,9 @@ const std::vector<ov::AnyMap> multiModelPriorityConfigs = {
         {ov::hint::model_priority(ov::hint::Priority::LOW)},
         {ov::hint::model_priority(ov::hint::Priority::DEFAULT)}};
 
+const std::vector<ov::AnyMap> autoModelUnsupportConfigs = {{ov::num_streams(4)},
+                                                           {ov::hint::allow_auto_batching(false)}};
+
 INSTANTIATE_TEST_SUITE_P(smoke_OVClassExecutableNetworkGetMetricTest,
                          OVClassExecutableNetworkGetMetricTest_MODEL_PRIORITY,
                          ::testing::Combine(::testing::Values("AUTO:CPU"),
@@ -162,4 +165,10 @@ INSTANTIATE_TEST_SUITE_P(smoke_Auto_OVClassAutoExcutableNetowrkGetDeviceProperti
                          OVClassExecutableNetworkGetMetricTestThrow_DEVICE_PROPERTIES,
                          ::testing::ValuesIn(autoDevicePropertiesConfigsThrow),
                          OVClassExecutableNetworkGetMetricTestThrow_DEVICE_PROPERTIES::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_Auto_OVClassAutoExcutableNetowrkGetMetricTestThrow,
+                         OVClassExecutableNetworkGetMetricTest_UnsupportedConfig,
+                         ::testing::Combine(::testing::Values("AUTO:CPU"),
+                                            ::testing::ValuesIn(autoModelUnsupportConfigs)),
+                         ::testing::PrintToStringParamName());
 }  // namespace

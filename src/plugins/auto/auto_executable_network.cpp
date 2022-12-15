@@ -26,14 +26,7 @@ void AutoExecutableNetwork::SetConfig(const std::map<std::string, IE::Parameter>
 }
 
 IE::Parameter AutoExecutableNetwork::GetConfig(const std::string& name) const {
-    {
-        std::lock_guard<std::mutex> lock(_autoSContext->_confMutex);
-        auto it = _autoSContext->_config.find(name);
-        if (it != _autoSContext->_config.end()) {
-            return it->second;
-        }
-    }
-    IE_THROW(NotFound) << name << " not found in the ExecutableNetwork config";
+    IE_THROW(NotImplemented);
 }
 
 IE::Parameter AutoExecutableNetwork::GetMetric(const std::string& name, const std::string& target_device) const {
@@ -82,6 +75,12 @@ IE::Parameter AutoExecutableNetwork::GetMetric(const std::string& name) const {
             return ov::hint::PerformanceMode::CUMULATIVE_THROUGHPUT;
         else
             return ov::hint::PerformanceMode::UNDEFINED;
+    } else if (name == ov::model_name) {
+        if (_autoSchedule->_loadContext[ACTUALDEVICE].isAlready) {
+            return _autoSchedule->_loadContext[ACTUALDEVICE].executableNetwork->GetMetric(
+                    name);
+        }
+        return _autoSchedule->_loadContext[CPU].executableNetwork->GetMetric(name);
     } else if (name == ov::device::priorities) {
         auto value = _autoSContext->_config.find(ov::device::priorities.name());
         return decltype(ov::device::priorities)::value_type {value->second.as<std::string>()};
@@ -194,10 +193,6 @@ IE::Parameter AutoExecutableNetwork::GetMetric(const std::string& name) const {
         }
         return decltype(ov::available_devices)::value_type {exeDevices};
     }
-    if (_autoSchedule->_loadContext[ACTUALDEVICE].isAlready) {
-        return _autoSchedule->_loadContext[ACTUALDEVICE].executableNetwork->GetMetric(
-                name);
-    }
-    return _autoSchedule->_loadContext[CPU].executableNetwork->GetMetric(name);
+    IE_THROW(NotFound) << name << " not found in the ExecutableNetwork config";
 }
 }  // namespace MultiDevicePlugin

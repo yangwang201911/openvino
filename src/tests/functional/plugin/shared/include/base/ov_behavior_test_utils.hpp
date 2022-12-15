@@ -257,6 +257,7 @@ public:
         simpleNetwork = ngraph::builder::subgraph::makeSingleConv();
     }
 };
+using OVClassExecutableNetworkGetMetricTest_UnsupportedConfig = OVClassExecutableNetworkGetMetricTest_Priority;
 using OVClassExecutableNetworkGetMetricTest_DEVICE_PRIORITY = OVClassExecutableNetworkGetMetricTest_Priority;
 using OVClassExecutableNetworkGetMetricTest_MODEL_PRIORITY = OVClassExecutableNetworkGetMetricTest_Priority;
 

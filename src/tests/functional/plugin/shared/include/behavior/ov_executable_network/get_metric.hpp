@@ -247,6 +247,16 @@ TEST_P(OVClassExecutableNetworkSupportedConfigTest, SupportedConfigWorks) {
     ASSERT_EQ(p, configValue);
 }
 
+TEST_P(OVClassExecutableNetworkGetMetricTest_UnsupportedConfig, GetMetricUnsupportedConfigThrows) {
+    ov::Core ie = createCoreWithTemplate();
+
+    auto compiled_model = ie.compile_model(simpleNetwork, target_device);
+
+    for (auto& property : configuration) {
+        ASSERT_THROW(compiled_model.get_property(property.first), ov::Exception);
+    }
+}
+
 TEST_P(OVClassExecutableNetworkUnsupportedConfigTest, UnsupportedConfigThrows) {
     ov::Core ie = createCoreWithTemplate();
 
