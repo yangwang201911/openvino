@@ -5,7 +5,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "plugin/mock_load_network_properties.hpp"
+#include "plugin/mock_auto_device_plugin.hpp"
+#include "plugin/mock_auto_test_common.hpp"
+#include "unit_test_utils/mocks/cpp_interfaces/interface/mock_coreImpl.hpp"
 
 using ::testing::_;
 using ::testing::MatcherCast;
@@ -34,6 +36,7 @@ MATCHER_P(MapContains, subMap, "Check if all the elements of the subMap are cont
 }
 using namespace MockMultiDevice;
 
+using Config = std::map<std::string, std::string>;
 using ConfigsParam = std::tuple<std::string,               // meta device name to load network
                                 std::vector<std::string>,  // hardware device name to expect loading network on
                                 Config>;                   // secondary property setting to device
@@ -41,8 +44,14 @@ using ConfigsParam = std::tuple<std::string,               // meta device name t
 using SecondaryConfigs = ConfigsParam;
 static std::vector<SecondaryConfigs> testConfigs;
 
-class LoadNetworkWithSecondaryConfigsMockTest : public ::testing::TestWithParam<SecondaryConfigs>,
-                                                public ::MockMultiDevice::LoadNetworkMockTest {
+class LoadNetworkWithSecondaryConfigsMockTest : public ::testing::TestWithParam<SecondaryConfigs> {
+public:
+    PluginTestBase<MockMultiDeviceInferencePlugin> pluginComm;
+    CoreTestBase<MockCoreImpl> coreComm;
+    std::shared_ptr<MockCoreImpl> mockCore;
+    std::shared_ptr<MockMultiDeviceInferencePlugin> mockPlugin;
+    InferenceEngine::CNNNetwork simpleCnnNetwork;
+
 public:
     static std::string getTestCaseName(testing::TestParamInfo<SecondaryConfigs> obj) {
         std::string deviceName;
@@ -58,10 +67,12 @@ public:
         auto cpuConfig = deviceConfigs.find("CPU");
         auto gpuConfig = deviceConfigs.find("GPU");
         result << "device_properties_";
-        if (cpuConfig != deviceConfigs.end())
-            result << "CPU_" << cpuConfig->second << "_";
-        if (gpuConfig != deviceConfigs.end())
-            result << "GPU_" << gpuConfig->second;
+
+        for (auto&& config : deviceConfigs) {
+            if (config.first == InferenceEngine::MultiDeviceConfigParams::KEY_MULTI_DEVICE_PRIORITIES)
+                continue;
+            result << config.first << "_" << config.second << "_";
+        }
         return result.str();
     }
 
@@ -90,43 +101,39 @@ public:
                                                {{"CPU", "NUM_STREAMS 3"}, {"MULTI_DEVICE_PRIORITIES", "CPU,GPU"}}});
         testConfigs.push_back(
             SecondaryConfigs{"MULTI:GPU", {"GPU"}, {{"GPU", "NUM_STREAMS 5"}, {"MULTI_DEVICE_PRIORITIES", "GPU"}}});
+
+        // Secondary properties setting should have the higher priority than primary properties.
         testConfigs.push_back(SecondaryConfigs{"MULTI:GPU,CPU",
                                                {"CPU", "GPU"},
-                                               {{"GPU", "NUM_STREAMS 5"}, {"MULTI_DEVICE_PRIORITIES", "GPU,CPU"}}});
+                                               {{"GPU", "PERFORMANCE_HINT LATENCY"},
+                                                {"PERFORMANCE_HINT", "THROUGHPUT"},
+                                                {"MULTI_DEVICE_PRIORITIES", "GPU,CPU"}}});
+        testConfigs.push_back(SecondaryConfigs{"AUTO",
+                                               {"CPU", "GPU"},
+                                               {{"GPU", "PERFORMANCE_HINT LATENCY"},
+                                                {"PERFORMANCE_HINT", "THROUGHPUT"},
+                                                {"MULTI_DEVICE_PRIORITIES", "GPU,CPU"}}});
         return testConfigs;
     }
 
-    void TearDown() override {
-        MockMultiDevice::LoadNetworkMockTest::TearDown();
-    }
+    void TearDown() override {}
 
     void SetUp() override {
-        MockMultiDevice::LoadNetworkMockTest::SetUp();
-        std::vector<std::string> configKeys = {"SUPPORTED_CONFIG_KEYS",
-                                               "NUM_STREAMS",
-                                               ov::hint::execution_mode.name(),
-                                               ov::hint::performance_mode.name()};
-        ON_CALL(*core, GetMetric(_, StrEq(METRIC_KEY(SUPPORTED_CONFIG_KEYS)), _)).WillByDefault(Return(configKeys));
-        ON_CALL(*core, GetConfig(_, StrEq(ov::compilation_num_threads.name()))).WillByDefault(Return(12));
-        ON_CALL(*core, GetSupportedConfig)
-            .WillByDefault([this](const std::string& device, const std::map<std::string, std::string>& fullConfigs) {
-                Config deviceConfigs;
-                auto supportedConfigs =
-                    core->GetMetric(device, METRIC_KEY(SUPPORTED_CONFIG_KEYS), {}).as<std::vector<std::string>>();
-                for (auto&& item : fullConfigs) {
-                    if (item.first.find(device) != std::string::npos) {
-                        Config primaryConfigs;
-                        std::stringstream strConfigs(item.second);
-                        ov::util::Read<Config>{}(strConfigs, primaryConfigs);
-                        deviceConfigs.insert(primaryConfigs.begin(), primaryConfigs.end());
-                        continue;
-                    }
-                    if (std::find(supportedConfigs.begin(), supportedConfigs.end(), item.first) !=
-                        supportedConfigs.end())
-                        deviceConfigs.insert({item.first, item.second});
-                }
-                return deviceConfigs;
-            });
+        std::string device;
+        std::vector<std::string> targetDevices;
+        Config config;
+        std::tie(device, targetDevices, config) = this->GetParam();
+        mockCore = coreComm.getMockCore().lock();
+        mockPlugin = pluginComm.getMockPlugin().lock();
+        pluginComm.setCore(mockCore);
+        std::string deviceName = "ÄUTO";
+        if (device.find("AUTO") != std::string::npos)
+            deviceName = "AUTO";
+        if (device.find("MULTI") != std::string::npos)
+            deviceName = "MULTI";
+        pluginComm.setName(deviceName);
+        std::shared_ptr<ngraph::Function> simpleNetwork = ngraph::builder::subgraph::makeSingleConv();
+        ASSERT_NO_THROW(simpleCnnNetwork = InferenceEngine::CNNNetwork(simpleNetwork));
     }
 };
 
@@ -146,10 +153,14 @@ TEST_P(LoadNetworkWithPropertyMockTest, LoadNetworkWithPrimaryConfigsCheckTest) 
     std::vector<std::string> targetDevices;
     Config deviceConfigs;
     std::tie(device, targetDevices, deviceConfigs) = this->GetParam();
-    if (device.find("AUTO") != std::string::npos)
-        plugin->SetName("AUTO");
-    if (device.find("MULTI") != std::string::npos)
-        plugin->SetName("MULTI");
+
+    // std::map<std::string, std::vector<std::string>> configKeys = {
+    //    {CommonTestUtils::DEVICE_CPU,
+    //     {"SUPPORTED_CONFIG_KEYS", ov::hint::performance_mode.name(), ov::hint::execution_mode.name()}},
+    //    {CommonTestUtils::DEVICE_GPU,
+    //     {"SUPPORTED_CONFIG_KEYS", ov::hint::performance_mode.name(), ov::hint::execution_mode.name()}}};
+    // coreComm.setSupportedConfigKeys(pluginComm.);
+
     std::ostringstream devicePriorities;
     for (auto&& device : targetDevices) {
         if (device == targetDevices.back())
@@ -157,30 +168,40 @@ TEST_P(LoadNetworkWithPropertyMockTest, LoadNetworkWithPrimaryConfigsCheckTest) 
         else
             devicePriorities << device << ",";
     }
-    ASSERT_NO_THROW(plugin->SetConfig({{"MULTI_DEVICE_PRIORITIES", devicePriorities.str()}}));
-    ASSERT_NO_THROW(plugin->SetConfig(deviceConfigs));
+    ASSERT_NO_THROW(mockPlugin->SetConfig({{"MULTI_DEVICE_PRIORITIES", devicePriorities.str()}}));
+    ASSERT_NO_THROW(mockPlugin->SetConfig(deviceConfigs));
 
     for (auto& deviceName : targetDevices) {
         EXPECT_CALL(
-            *core,
+            *mockCore,
             LoadNetwork(::testing::Matcher<const InferenceEngine::CNNNetwork&>(_),
                         ::testing::Matcher<const std::string&>(deviceName),
                         ::testing::Matcher<const std::map<std::string, std::string>&>(MapContains(deviceConfigs))))
             .Times(1);
     }
-
-    ASSERT_NO_THROW(plugin->LoadExeNetworkImpl(simpleCnnNetwork, deviceConfigs));
+    ASSERT_NO_THROW(mockPlugin->LoadExeNetworkImpl(simpleCnnNetwork, deviceConfigs));
 }
 
 TEST_P(LoadNetworkWithSecondaryConfigsMockTest, LoadNetworkWithSecondaryConfigsTest) {
     std::string device;
     std::vector<std::string> targetDevices;
+    // std::map<std::string, std::vector<std::string>> configKeys = {{CommonTestUtils::DEVICE_CPU,
+    //                                                               {"SUPPORTED_CONFIG_KEYS",
+    //                                                                ov::num_streams.name(),
+    //                                                                ov::hint::performance_mode.name(),
+    //                                                                ov::hint::execution_mode.name()}},
+    //                                                              {CommonTestUtils::DEVICE_GPU,
+    //                                                               {"SUPPORTED_CONFIG_KEYS",
+    //                                                                ov::num_streams.name(),
+    //                                                                ov::hint::performance_mode.name(),
+    //                                                                ov::hint::execution_mode.name()}}};
+    // coreComm.setSupportedConfigKeys(configKeys);
     Config config;
     std::tie(device, targetDevices, config) = this->GetParam();
-    if (device.find("AUTO") != std::string::npos)
-        plugin->SetName("AUTO");
-    if (device.find("MULTI") != std::string::npos)
-        plugin->SetName("MULTI");
+    // if (device.find("AUTO") != std::string::npos)
+    //    mockPlugin->SetName("AUTO");
+    // if (device.find("MULTI") != std::string::npos)
+    //    mockPlugin->SetName("MULTI");
 
     for (auto& deviceName : targetDevices) {
         auto item = config.find(deviceName);
@@ -191,14 +212,14 @@ TEST_P(LoadNetworkWithSecondaryConfigsMockTest, LoadNetworkWithSecondaryConfigsT
             ov::util::Read<Config>{}(strConfigs, deviceConfigs);
         }
         EXPECT_CALL(
-            *core,
+            *mockCore,
             LoadNetwork(::testing::Matcher<const InferenceEngine::CNNNetwork&>(_),
                         ::testing::Matcher<const std::string&>(deviceName),
                         ::testing::Matcher<const std::map<std::string, std::string>&>(MapContains(deviceConfigs))))
             .Times(1);
     }
 
-    ASSERT_NO_THROW(plugin->LoadExeNetworkImpl(simpleCnnNetwork, config));
+    ASSERT_NO_THROW(pluginComm.mockPlugin->LoadExeNetworkImpl(simpleCnnNetwork, config));
 }
 
 INSTANTIATE_TEST_SUITE_P(smoke_AutoMock_LoadNetworkWithSecondaryConfigs,
