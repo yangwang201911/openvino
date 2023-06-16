@@ -359,6 +359,8 @@ bool ov::pass::ConvertPrecision::run_on_model(const std::shared_ptr<ngraph::Func
         {opset4::Range::get_type_info_static(), fuse_type_to_range_v4},
         {opset9::Eye::get_type_info_static(), fuse_type_to_eye_v9},
         {opset10::Unique::get_type_info_static(), fuse_type_to_unique_v10},
+        {opset10::IsFinite::get_type_info_static(), fuse_type_to_reduce_logical<opset10::IsFinite>},
+        {opset10::IsNaN::get_type_info_static(), fuse_type_to_reduce_logical<opset10::IsNaN>},
         {opset8::RandomUniform::get_type_info_static(), fuse_type_to_random_uniform_v8}};
 
     for (const auto& it : m_additional_type_to_fuse_map) {
@@ -370,8 +372,6 @@ bool ov::pass::ConvertPrecision::run_on_model(const std::shared_ptr<ngraph::Func
     static type_to_fuse_map type_to_extend{
         {opset4::Select::get_type_info_static(), extend_select_type},
         {opset1::Reverse::get_type_info_static(), extend_reverse_type},
-        {opset10::IsFinite::get_type_info_static(), extend_isFinite_type},
-        {opset10::IsNaN::get_type_info_static(), extend_isNaN_type},
     };
 
     bool is_changed = convert_precision(*this,
@@ -770,42 +770,6 @@ bool extend_reverse_type(const std::shared_ptr<ngraph::Node>& node, const precis
                 ngraph::element::TypeVector{casted->get_output_element_type(0)});
             replace_node(node, relaxed_op);
         }
-        return true;
-    }
-    return false;
-}
-
-bool extend_isFinite_type(const std::shared_ptr<ngraph::Node>& node, const precisions_map& precisions) {
-    auto it = precisions.find(node->get_output_element_type(0));
-    if (it == precisions.end())
-        return false;
-    const auto& to = it->second;
-    if (auto type_relaxed = std::dynamic_pointer_cast<ov::op::TypeRelaxedBase>(node)) {
-        type_relaxed->set_overridden_output_type(to);
-        return true;
-    } else if (auto casted = std::dynamic_pointer_cast<opset10::IsFinite>(node)) {
-        auto relaxed_op = std::make_shared<ov::op::TypeRelaxed<opset10::IsFinite>>(*casted,
-                                                                                   ov::element::TypeVector{},
-                                                                                   ov::element::TypeVector{to});
-        replace_node(node, relaxed_op);
-        return true;
-    }
-    return false;
-}
-
-bool extend_isNaN_type(const std::shared_ptr<ngraph::Node>& node, const precisions_map& precisions) {
-    auto it = precisions.find(node->get_output_element_type(0));
-    if (it == precisions.end())
-        return false;
-    const auto& to = it->second;
-    if (auto type_relaxed = std::dynamic_pointer_cast<ov::op::TypeRelaxedBase>(node)) {
-        type_relaxed->set_overridden_output_type(to);
-        return true;
-    } else if (auto casted = std::dynamic_pointer_cast<opset10::IsNaN>(node)) {
-        auto relaxed_op = std::make_shared<ov::op::TypeRelaxed<opset10::IsNaN>>(*casted,
-                                                                                ov::element::TypeVector{},
-                                                                                ov::element::TypeVector{to});
-        replace_node(node, relaxed_op);
         return true;
     }
     return false;
