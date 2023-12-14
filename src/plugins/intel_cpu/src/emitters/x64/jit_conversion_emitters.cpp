@@ -5,7 +5,7 @@
 #include "jit_conversion_emitters.hpp"
 #include "utils/bfloat16.hpp"
 #include <cpu/x64/jit_uni_eltwise.hpp>
-#include <ngraph/opsets/opset1.hpp>
+#include <openvino/opsets/opset1.hpp>
 #include <nodes/eltwise.h>
 
 using namespace InferenceEngine;
@@ -17,8 +17,8 @@ using namespace Xbyak;
 namespace ov {
 namespace intel_cpu {
 
-jit_convert_emitter::jit_convert_emitter(jit_generator *host, cpu_isa_t host_isa, const std::shared_ptr<ngraph::Node>& node, Precision exec_prc)
-: jit_emitter(host, host_isa, node, exec_prc) {
+jit_convert_emitter::jit_convert_emitter(jit_generator *host, cpu_isa_t host_isa, const std::shared_ptr<ov::Node>& node, ov::element::Type exec_prc)
+: jit_emitter(host, host_isa, exec_prc) {
     input_type = node->get_input_element_type(0);
     output_type = node->get_output_element_type(0);
 
@@ -33,9 +33,9 @@ void jit_convert_emitter::validate_types() const {
     };
 
     if (!is_supported_type(input_type))
-        IE_THROW() << "Unsupported input type: " << input_type.get_type_name();
+        OPENVINO_THROW("Unsupported input type: ", input_type.get_type_name());
     if (!is_supported_type(output_type))
-        IE_THROW() << "Unsupported output type: " << output_type.get_type_name();
+        OPENVINO_THROW("Unsupported output type: ", output_type.get_type_name());
 }
 
 size_t jit_convert_emitter::get_inputs_num() const { return 1; }
@@ -52,13 +52,13 @@ void jit_convert_emitter::float2bfloat(const std::vector<size_t> &in_vec_idxs, c
     Vmm vmm_src = Vmm(in_vec_idxs[0]);
     Vmm vmm_dst  = Vmm(out_vec_idxs[0]);
     if (!uni_vcvtneps2bf16)
-        IE_THROW() << "Converter from float to bf16 isn't initialized!";
+        OPENVINO_THROW("Converter from float to bf16 isn't initialized!");
 
     uni_vcvtneps2bf16->emit_code({static_cast<size_t>(vmm_src.getIdx())}, {static_cast<size_t>(vmm_dst.getIdx())});
 }
 
 jit_convert_truncation_emitter::jit_convert_truncation_emitter(jit_generator *host, cpu_isa_t host_isa,
-                                                               const std::shared_ptr<ngraph::Node>& node, Precision exec_prc)
+                                                               const std::shared_ptr<ov::Node>& node, ov::element::Type exec_prc)
         : jit_convert_emitter(host, host_isa, node, exec_prc) {
     prepare_table();
 }
@@ -110,6 +110,11 @@ void jit_convert_truncation_emitter::emit_isa(const std::vector<size_t> &in_vec_
             if (one_of(output_type, ov::element::i32, ov::element::i8, ov::element::u8))
                 h->uni_vcvttps2dq(vmm_dst, vmm_dst);
             break;
+        case ov::element::f16:
+            h->vcvtph2ps(vmm_dst, Ymm(vmm_src.getIdx()));
+            if (one_of(output_type, ov::element::i32, ov::element::i8, ov::element::u8))
+                h->uni_vcvttps2dq(vmm_dst, vmm_dst);
+            break;
         case ov::element::i8:
             h->uni_vpmovsxbd(vmm_dst, vmm_src);
             break;
@@ -138,6 +143,15 @@ void jit_convert_truncation_emitter::emit_isa(const std::vector<size_t> &in_vec_
                 float2bfloat<isa>({static_cast<size_t>(vmm_dst.getIdx())}, {static_cast<size_t>(vmm_dst.getIdx())});
             }
             break;
+        case ov::element::f16:
+            if (input_type == ov::element::f32) {
+                h->vcvtps2ph(vmm_dst, vmm_src, 0x4);
+            } else {
+                if (one_of(input_type, ov::element::i8, ov::element::u8)) {
+                    h->uni_vcvtdq2ps(vmm_dst, vmm_dst);
+                }
+                h->vcvtps2ph(vmm_dst, vmm_dst, 0x4);
+            }
         case ov::element::i8:
         case ov::element::u8:
             if (input_type == ov::element::i32) {
@@ -179,7 +193,7 @@ void jit_convert_truncation_emitter::dword2int8(const std::vector<size_t> &in_ve
 }
 
 jit_convert_saturation_emitter::jit_convert_saturation_emitter(jit_generator *host, cpu_isa_t host_isa,
-                                                               const std::shared_ptr<ngraph::Node>& node, Precision exec_prc)
+                                                               const std::shared_ptr<ov::Node>& node, ov::element::Type exec_prc)
     : jit_convert_emitter(host, host_isa, node, exec_prc) {
 }
 
@@ -222,6 +236,11 @@ void jit_convert_saturation_emitter::emit_isa(const std::vector<size_t> &in_vec_
             if (one_of(output_type, ov::element::i32, ov::element::i8, ov::element::u8))
                 h->uni_vcvttps2dq(vmm_dst, vmm_dst);
             break;
+        case ov::element::f16:
+            h->vcvtph2ps(vmm_dst, Ymm(vmm_src.getIdx()));
+            if (one_of(output_type, ov::element::i32, ov::element::i8, ov::element::u8))
+                h->uni_vcvttps2dq(vmm_dst, vmm_dst);
+            break;
         case ov::element::i8:
             h->uni_vpmovsxbd(vmm_dst, vmm_src);
             break;
@@ -234,7 +253,7 @@ void jit_convert_saturation_emitter::emit_isa(const std::vector<size_t> &in_vec_
 
     switch (output_type) {
         case ov::element::f32:
-            if (!one_of(input_type, ov::element::i32, ov::element::bf16)) {
+            if (!one_of(input_type, ov::element::i32, ov::element::bf16, ov::element::f16)) {
                 h->uni_vcvtdq2ps(vmm_dst, vmm_dst);
             }
             break;
@@ -248,6 +267,16 @@ void jit_convert_saturation_emitter::emit_isa(const std::vector<size_t> &in_vec_
                     h->uni_vcvtdq2ps(vmm_dst, vmm_dst);
                 }
                 float2bfloat<isa>({static_cast<size_t>(vmm_dst.getIdx())}, {static_cast<size_t>(vmm_dst.getIdx())});
+            }
+            break;
+        case ov::element::f16:
+            if (input_type == ov::element::f32) {
+                h->vcvtps2ph(vmm_dst, vmm_src, 0x4);
+            } else {
+                if (one_of(input_type, ov::element::i8, ov::element::u8)) {
+                    h->uni_vcvtdq2ps(vmm_dst, vmm_dst);
+                }
+                h->vcvtps2ph(vmm_dst, vmm_dst, 0x4);
             }
             break;
         case ov::element::i8:

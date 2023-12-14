@@ -147,7 +147,7 @@ static void infer_model(InferenceEngine::Core& ie, InferenceEngine::CNNNetwork& 
 
 static std::string model_full_path(const char* path) {
     return FileUtils::makePath<char>(
-        FileUtils::makePath<char>(CommonTestUtils::getExecutableDirectory(), TEST_MODELS), path);
+        FileUtils::makePath<char>(ov::test::utils::getExecutableDirectory(), TEST_MODELS), path);
 }
 
 TEST(Extension, XmlModelWithCustomAbs) {
@@ -200,12 +200,12 @@ TEST(Extension, XmlModelWithCustomAbs) {
 
 
 static std::string get_extension_path() {
-    return FileUtils::makePluginLibraryName<char>(CommonTestUtils::getExecutableDirectory(),
-        std::string("template_extension") + IE_BUILD_POSTFIX);
+    return FileUtils::makePluginLibraryName<char>(ov::test::utils::getExecutableDirectory(),
+        std::string("template_extension") + OV_BUILD_POSTFIX);
 }
 
 
-TEST(Extension, XmlModelWithExtensionFromDSO) {
+TEST(Extension, smoke_XmlModelWithExtensionFromDSO) {
     std::string model = R"V0G0N(
 <net name="Network" version="10">
     <layers>
@@ -260,6 +260,7 @@ TEST(Extension, XmlModelWithExtensionFromDSO) {
     std::vector<float> input_values{1, 2, 3, 4, 5, 6, 7, 8};
     std::vector<float> expected{12, 13, 14, 15, 16, 17, 18, 19};
     InferenceEngine::Core ie;
+    ie.SetConfig({ { ov::hint::inference_precision.name(), ov::element::f32.get_type_name() } }, "CPU");
     ie.AddExtension(std::make_shared<InferenceEngine::Extension>(get_extension_path()));
     InferenceEngine::Blob::CPtr weights;
     auto network = ie.ReadNetwork(model, weights);

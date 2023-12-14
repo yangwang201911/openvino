@@ -87,7 +87,10 @@ JitConstants KernelBase::MakeBaseParamsJitConstants(const base_params& params, b
 
     // for activation function
     jit.Merge(MakeUnitTypeJitConstants(unitType));
-    jit.Merge(MakeActivationJitConstants(params.activations, unitType));
+    // Changed data type from unit type to output data type to fix the issue case that
+    // the activation function makes cl kernel build error when the output data type
+    // and unit type are different and activation param is existed
+    jit.Merge(MakeActivationJitConstants(params.activations, params.outputs[0].GetDType()));
 
     if (add_tensor_definitions) {
         for (size_t i = 0; i < params.inputs.size(); i++) {
@@ -198,6 +201,7 @@ JitConstants KernelBase::MakeFusedOpsDeclsJitConstants(const kernel_selector::ba
         return jit;
 
     std::string input_decls = "";
+    std::string input_args = "";
 
     for (size_t i = 0; i < params.fused_ops.size(); i++) {
         auto fused_dep_codegen = FusedOpsCodeGenerator(params.fused_ops[i]);
@@ -208,10 +212,12 @@ JitConstants KernelBase::MakeFusedOpsDeclsJitConstants(const kernel_selector::ba
         if (!params.fused_ops[i].tensors.empty()) {
             std::string optional_comma = (!input_decls.empty() ? "," : "");
             input_decls += optional_comma + "\\\n\tFUSED_OP" + toCodeString(i) + "_DECLS";
+            input_args += optional_comma + "\\\n\tFUSED_OP" + toCodeString(i) + "_ARGS";
         }
     }
 
     jit.AddConstant(MakeJitConstant("FUSED_OPS_DECLS", input_decls));
+    jit.AddConstant(MakeJitConstant("FUSED_OPS_ARGS", input_args));
     jit.AddConstant(MakeJitConstant("HAS_FUSED_OPS", true));
     jit.AddConstant(MakeJitConstant("HAS_FUSED_OPS_DECLS", !input_decls.empty()));
 

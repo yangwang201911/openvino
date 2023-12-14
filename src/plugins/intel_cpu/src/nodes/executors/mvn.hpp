@@ -25,14 +25,13 @@ enum MVNEpsMode {
 
 struct MVNAttrs {
     MVNLayoutType layout = mvn_planar;
-    std::tuple<size_t, size_t, size_t, size_t, size_t> shape5D = std::make_tuple(0u, 0u, 0u, 0u, 0u);
     bool initAcrossChannels_ = false;
     bool execAcrossChannels_ = false;
     bool normalizeVariance_  = false;
     float epsValue_ = 0.0f;
     MVNEpsMode epsMode_ = INSIDE_SQRT;
-    InferenceEngine::Precision src_prc;
-    InferenceEngine::Precision dst_prc;
+    ov::element::Type src_prc;
+    ov::element::Type dst_prc;
 };
 
 class MVNExecutor {
@@ -48,7 +47,7 @@ public:
 
     virtual impl_desc_type getImplType() const = 0;
 
-    static InferenceEngine::SizeVector transformTo5DCase(const InferenceEngine::SizeVector& shape, bool initAcrossChannels);
+    static VectorDims transformTo5DCase(const VectorDims& shape, bool initAcrossChannels);
 
 protected:
     MVNAttrs mvnAttrs;

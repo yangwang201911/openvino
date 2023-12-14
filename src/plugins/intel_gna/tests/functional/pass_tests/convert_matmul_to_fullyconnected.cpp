@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "functional_test_utils/blob_utils.hpp"
-#include "ngraph_functions/builders.hpp"
-#include "ngraph_functions/utils/ngraph_helpers.hpp"
+#include "ov_models/builders.hpp"
+#include "ov_models/utils/ov_helpers.hpp"
 #include "shared_test_classes/base/layer_test_utils.hpp"
 
 typedef std::tuple<std::vector<std::vector<size_t>>,   // Input shape
@@ -37,8 +37,8 @@ public:
         for (auto const& configItem : configuration) {
             result << "_configItem=" << configItem.first << "_" << configItem.second;
         }
-        result << "_IS=" << CommonTestUtils::vec2str(inputShape[1]) << "_";
-        result << "_CS=" << CommonTestUtils::vec2str(inputShape[0]) << "_";
+        result << "_IS=" << ov::test::utils::vec2str(inputShape[1]) << "_";
+        result << "_CS=" << ov::test::utils::vec2str(inputShape[0]) << "_";
         return result.str();
     }
 
@@ -47,7 +47,7 @@ public:
         blob->allocate();
 
         auto* rawBlobDataPtr = blob->buffer().as<float*>();
-        std::vector<float> values = CommonTestUtils::generate_float_numbers(blob->size(), -0.2f, 0.2f);
+        std::vector<float> values = ov::test::utils::generate_float_numbers(blob->size(), -0.2f, 0.2f);
         for (size_t i = 0; i < blob->size(); i++) {
             rawBlobDataPtr[i] = values[i];
         }
@@ -61,15 +61,15 @@ protected:
         std::tie(inputShape, netPrecision, targetDevice, configuration) = this->GetParam();
         auto ngPrc = FuncTestUtils::PrecisionUtils::convertIE2nGraphPrc(netPrecision);
 
-        auto params = ngraph::builder::makeParams(ngPrc, {inputShape[1]});
+        ov::ParameterVector params{std::make_shared<ov::op::v0::Parameter>(ngPrc, ov::Shape(inputShape[1]))};
         std::vector<float> weights =
-            CommonTestUtils::generate_float_numbers(inputShape[0][0] * inputShape[0][1], -0.2f, 0.2f);
+            ov::test::utils::generate_float_numbers(inputShape[0][0] * inputShape[0][1], -0.2f, 0.2f);
         auto const_mult2 = ngraph::builder::makeConstant<float>(ngPrc, inputShape[0], weights);
 
         auto const_eltwise = ngraph::builder::makeConstant<float>(ngPrc, {inputShape[0][0], inputShape[1][1]}, {1.0f});
-        auto matmul = std::make_shared<ngraph::opset1::MatMul>(const_mult2, params[0], false, false);
+        auto matmul = std::make_shared<ov::opset1::MatMul>(const_mult2, params[0], false, false);
 
-        auto eltwise = std::make_shared<ngraph::opset1::Multiply>(matmul, const_eltwise);
+        auto eltwise = std::make_shared<ov::opset1::Multiply>(matmul, const_eltwise);
         function = std::make_shared<ngraph::Function>(eltwise, params, "ConvertMatmulToFC");
     }
 };
@@ -90,8 +90,8 @@ public:
         for (auto const& configItem : configuration) {
             result << "_configItem=" << configItem.first << "_" << configItem.second;
         }
-        result << "_IS=" << CommonTestUtils::vec2str(inputShape[1]) << "_";
-        result << "_CS=" << CommonTestUtils::vec2str(inputShape[0]) << "_";
+        result << "_IS=" << ov::test::utils::vec2str(inputShape[1]) << "_";
+        result << "_CS=" << ov::test::utils::vec2str(inputShape[0]) << "_";
         return result.str();
     }
 
@@ -100,7 +100,7 @@ public:
         blob->allocate();
 
         auto* rawBlobDataPtr = blob->buffer().as<float*>();
-        std::vector<float> values = CommonTestUtils::generate_float_numbers(blob->size(), -0.1f, 0.1f);
+        std::vector<float> values = ov::test::utils::generate_float_numbers(blob->size(), -0.1f, 0.1f);
         for (size_t i = 0; i < blob->size(); i++) {
             rawBlobDataPtr[i] = values[i];
         }
@@ -114,28 +114,28 @@ protected:
         std::tie(inputShape, netPrecision, targetDevice, configuration) = this->GetParam();
         auto ngPrc = FuncTestUtils::PrecisionUtils::convertIE2nGraphPrc(netPrecision);
 
-        auto params = ngraph::builder::makeParams(ngPrc, {{1, inputShape[1][0] * inputShape[1][1]}});
-
-        auto reshape1 = std::make_shared<ngraph::opset1::Reshape>(
+        ov::ParameterVector params{
+            std::make_shared<ov::op::v0::Parameter>(ngPrc, ov::Shape({1, inputShape[1][0] * inputShape[1][1]}))};
+        auto reshape1 = std::make_shared<ov::opset1::Reshape>(
             params[0],
             ngraph::builder::makeConstant(ngraph::element::i64, {inputShape[1].size()}, inputShape[1]),
             false);
-        auto transpose1 = std::make_shared<ngraph::opset1::Transpose>(
+        auto transpose1 = std::make_shared<ov::opset1::Transpose>(
             reshape1,
-            ngraph::opset1::Constant::create(ngraph::element::i64, ngraph::Shape{2}, std::vector<int64_t>{1, 0}));
+            ov::op::v0::Constant::create(ngraph::element::i64, ngraph::Shape{2}, std::vector<int64_t>{1, 0}));
 
         std::vector<float> weights =
-            CommonTestUtils::generate_float_numbers(inputShape[0][0] * inputShape[0][1], -0.1f, 0.1f);
+            ov::test::utils::generate_float_numbers(inputShape[0][0] * inputShape[0][1], -0.1f, 0.1f);
         auto const_mult2 = ngraph::builder::makeConstant<float>(ngPrc, inputShape[0], weights);
-        auto matmul = std::make_shared<ngraph::opset1::MatMul>(const_mult2, transpose1, false, false);
-        auto relu = std::make_shared<ngraph::opset1::Relu>(matmul);
+        auto matmul = std::make_shared<ov::opset1::MatMul>(const_mult2, transpose1, false, false);
+        auto relu = std::make_shared<ov::opset1::Relu>(matmul);
 
-        auto transpose2 = std::make_shared<ngraph::opset1::Transpose>(
+        auto transpose2 = std::make_shared<ov::opset1::Transpose>(
             relu,
-            ngraph::opset1::Constant::create(ngraph::element::i64, ngraph::Shape{2}, std::vector<int64_t>{1, 0}));
+            ov::op::v0::Constant::create(ngraph::element::i64, ngraph::Shape{2}, std::vector<int64_t>{1, 0}));
         auto transpose_output_shape = transpose2->get_output_shape(0);
         ngraph::Shape output_shape = {1, transpose_output_shape[0] * transpose_output_shape[1]};
-        auto reshape2 = std::make_shared<ngraph::opset1::Reshape>(
+        auto reshape2 = std::make_shared<ov::opset1::Reshape>(
             transpose2,
             ngraph::builder::makeConstant(ngraph::element::i64, {output_shape.size()}, output_shape),
             false);
@@ -177,7 +177,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_convert_matmul_to_fc,
                          ConvertMatmulToFcPass,
                          ::testing::Combine(::testing::ValuesIn(input_shapes),
                                             ::testing::ValuesIn(netPrecisions),
-                                            ::testing::Values(CommonTestUtils::DEVICE_GNA),
+                                            ::testing::Values(ov::test::utils::DEVICE_GNA),
                                             ::testing::ValuesIn(configs)),
                          ConvertMatmulToFcPass::getTestCaseName);
 
@@ -185,7 +185,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_convert_matmul_to_fc,
                          ConvertMatmulToFcWithTransposesPass,
                          ::testing::Combine(::testing::ValuesIn(input_shapes_transposes),
                                             ::testing::ValuesIn(netPrecisions),
-                                            ::testing::Values(CommonTestUtils::DEVICE_GNA),
+                                            ::testing::Values(ov::test::utils::DEVICE_GNA),
                                             ::testing::ValuesIn(configs)),
                          ConvertMatmulToFcWithTransposesPass::getTestCaseName);
 }  // namespace LayerTestsDefinitions

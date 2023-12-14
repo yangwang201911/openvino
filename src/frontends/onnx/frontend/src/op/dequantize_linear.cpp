@@ -16,6 +16,7 @@
 #include "onnx_import/core/null_node.hpp"
 #include "utils/common.hpp"
 
+OPENVINO_SUPPRESS_DEPRECATED_START
 namespace ngraph {
 namespace onnx_import {
 namespace op {
@@ -173,10 +174,16 @@ OutputVector dequantize_linear(const Node& node) {
     const auto& scale = inputs[1];
     const auto zero_point = op::detail::get_zero_point(inputs);
 
+    const auto& scale_shape = scale.get_partial_shape();
     // per-tensor quantization, axis attribute ignored
-    if (scale.get_partial_shape().rank().is_static() && scale.get_partial_shape().rank().get_length() == 0) {
-        if (!zero_point || (zero_point->get_output_partial_shape(0).rank().is_static() &&
-                            zero_point->get_output_partial_shape(0).rank().get_length() == 0)) {
+    if ((scale_shape.rank().is_static() && scale_shape.size() == 0) ||
+        (scale_shape.is_static() && shape_size(scale_shape.get_shape()) == 1)) {
+        if (!zero_point) {
+            return set_1::dequantize_linear(node);
+        }
+        const auto& zero_point_shape = zero_point->get_output_partial_shape(0);
+        if ((zero_point_shape.rank().is_static() && zero_point_shape.size() == 0) ||
+            (zero_point_shape.is_static() && shape_size(zero_point_shape.get_shape()) == 1)) {
             return set_1::dequantize_linear(node);
         }
     }
@@ -187,3 +194,4 @@ OutputVector dequantize_linear(const Node& node) {
 }  // namespace op
 }  // namespace onnx_import
 }  // namespace ngraph
+OPENVINO_SUPPRESS_DEPRECATED_END

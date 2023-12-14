@@ -20,6 +20,9 @@
 #include "legacy/ngraph_ops/fully_connected.hpp"
 #include "ngraph/opsets/opset7.hpp"
 #include "ngraph/opsets/opset9.hpp"
+#include "openvino/runtime/threading/thread_local.hpp"
+#include "ops/gna_convolution.hpp"
+#include "ops/gna_max_pool.hpp"
 
 namespace ov {
 namespace intel_gna {
@@ -162,19 +165,22 @@ public:
 class Limitations {
 public:
     /**
-     * @brief Create instance of the Limitations class. Due to Limitations being a singleton, multiple instances of the
-     * plugin with different compilation targets cannot exist at the same time
+     * @brief Create an instance of the Limitations class. Since Limitations is designed as a singleton, multiple
+     * instances of the plugin with different compilation targets cannot coexist simultaneously for the same thread.
      * @param compile_target GNA compile target
      */
     static void init(const target::DeviceVersion& compile_target);
+
+    /**
+     * @brief Delete the instance of the Limitations class for the currently running thread.
+     */
+    static void deinit();
 
     /**
      * @brief Returns the instance of Limitations object. Requires an Init call before the first usage
      */
     static inline std::shared_ptr<Limitations> get_instance();
 
-    static bool is_transpose_2d(const std::vector<size_t>& shape);
-    static bool is_transpose_supported(const std::vector<size_t>& shape);
     static size_t get_min_batch_to_fit_in_buffer(InferenceEngine::DataPtr input);
 
     /**
@@ -202,6 +208,13 @@ public:
      * @return true if supported
      */
     static bool is_split_supported(const std::shared_ptr<ov::Node>& node, bool is_exception_allowed = false);
+
+    /**
+     * @brief Validates if transpose is supported by GNA
+     * @param shape transpose
+     * @return true if supported
+     */
+    static bool is_transpose_supported(const ov::Shape& shape);
     /**
      * @brief Validates if transpose is supported by GNA
      * @param node transpose
@@ -209,13 +222,13 @@ public:
      */
     static bool is_transpose_supported(const std::shared_ptr<const ov::Node>& node);
     /**
-     * @brief Validates if legacy convolution is supported by GNA
-     * @param conv_ie convolution
+     * @brief Validates if convolution is supported by GNA
+     * @param conv_gna GNA convolution
      * @param gna_precision GNA inference precision
      * @param is_exception_allowed flag specifies whether exception is allowed
      * @return true if supported
      */
-    bool is_conv_supported(const std::shared_ptr<ngraph::op::ConvolutionIE>& conv_ie,
+    bool is_conv_supported(const std::shared_ptr<ov::intel_gna::op::GNAConvolution>& conv_gna,
                            const InferenceEngine::Precision gna_precision,
                            bool is_exception_allowed = false);
     /**
@@ -224,8 +237,18 @@ public:
      * @param is_exception_allowed flag specifies whether exception is allowed
      * @return true if precision is found in supported
      */
-    bool is_pooling_supported(const std::shared_ptr<ngraph::opset7::MaxPool> max_pool,
+    bool is_pooling_supported(const std::shared_ptr<ov::intel_gna::op::GNAMaxPool> max_pool,
                               bool is_exception_allowed = false);
+
+    static bool is_concat_supported(const std::shared_ptr<const ov::Node>& node, bool is_exception_allowed);
+    static bool is_forward_transposed_concat_supported(const std::shared_ptr<const ov::Node>& node,
+                                                       const AxisVector& order);
+    static bool is_backward_transposed_concat_supported(const std::shared_ptr<const ov::Node>& node,
+                                                        const AxisVector& order);
+    static bool is_forward_transposed_split_supported(const std::shared_ptr<const ov::Node>& node,
+                                                      const AxisVector& order);
+    static bool is_backward_transposed_split_supported(const std::shared_ptr<const ov::Node>& node,
+                                                       const AxisVector& order);
 
     /**
      * @brief Validates if operation is supported by GNA
@@ -248,6 +271,7 @@ public:
 
     bool use_only_16bit_convolution_weights() const;
     bool is_crop_affined_offset(size_t numberOfElements) const;
+    bool is_aligned(size_t addr) const;
     size_t get_memory_alignment() const;
     std::shared_ptr<cnn2d::AbstractValidator> get_cnn_validator() const;
 
@@ -260,7 +284,6 @@ public:
     constexpr static uint32_t kConvFilterSizeDivider = 8;
     constexpr static uint32_t kConvFilterMaxSize = 768;
     constexpr static uint32_t kConvEachKernelByteAlignment = 16;
-    constexpr static uint32_t kInputByteAlignment = 64;
     constexpr static uint32_t kNoOfInputsDivisor = 8;
     constexpr static uint32_t kNoOfInputsLowPrecDivisor = 16;
     constexpr static uint32_t kAffineMaxBatchSize = 8;
@@ -274,10 +297,12 @@ public:
     // Currently split layer only supports 2 bytes in int16 and int8 mode.
     // In fp32 mode this is not necessary but is useful for testing
     constexpr static uint32_t kBytesPerSplitElement = 2;
-
     // Currently crop layer only supports 2 bytes in int16 and int8 mode.
     // In fp32 mode this is not necessary but is useful for testing
     constexpr static uint32_t kBytesPerCropElement = 2;
+    // currently concat layer only supports 2 bytes in int16 and int8 mode. In fp32 mode this no necessary but usefull
+    // for testing
+    constexpr static uint32_t kBytesPerConcatElement = 2;
     constexpr static uint32_t kMemoryPageSize = 4096;
 
 private:
@@ -287,26 +312,28 @@ private:
 
     size_t get_memory_alignment_bytes(const target::DeviceVersion& target) const;
 
-    IE_SUPPRESS_DEPRECATED_START
-    static bool validate_concat_axis(const InferenceEngine::CNNLayerPtr layer, std::string& errMessage);
-    IE_SUPPRESS_DEPRECATED_END
-
     bool m_use_only_16bit_conv_weights = false;
     size_t m_mem_alignment = 0;
     std::shared_ptr<cnn2d::AbstractValidator> m_cnn_validator;
-    static thread_local std::shared_ptr<Limitations> k_instance;
+
+    static ov::threading::ThreadLocal<std::shared_ptr<Limitations>> kInstance;
 };
 
 inline std::shared_ptr<Limitations> Limitations::get_instance() {
-    if (!k_instance) {
+    auto& instance = kInstance.local();
+    if (!instance) {
         THROW_GNA_EXCEPTION << "Limitations instance is not initialized.\n";
     }
-    return k_instance;
+    return instance;
 }
 
 inline bool Limitations::is_crop_affined_offset(size_t numberOfElements) const {
     const auto cropOffset = numberOfElements * kBytesPerCropElement;
-    return (ALIGN64(cropOffset) != cropOffset);
+    return !is_aligned(cropOffset);
+}
+
+inline bool Limitations::is_aligned(size_t addr) const {
+    return (addr == ALIGN(addr, get_memory_alignment()));
 }
 
 inline size_t Limitations::get_memory_alignment() const {

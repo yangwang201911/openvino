@@ -2,23 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#include "common_test_utils/node_builders/rnn_cell.hpp"
 #include "shared_test_classes/base/ov_subgraph.hpp"
-#include "ngraph_functions/builders.hpp"
 #include "test_utils/cpu_test_utils.hpp"
 
 using namespace CPUTestUtils;
-using namespace ov::test;
 
-namespace CPULayerTestsDefinitions {
+namespace ov {
+namespace test {
 
-using RNNCellCPUParams = typename std::tuple<
-        std::vector<InputShape>,            // Shapes
-        std::vector<std::string>,           // Activations
-        float,                              // Clip
-        ElementType,                        // Network precision
-        CPUSpecificParams,                  // CPU specific params
-        std::map<std::string, std::string>  // Additional config
->;
+using RNNCellCPUParams = typename std::tuple<std::vector<InputShape>,   // Shapes
+                                             std::vector<std::string>,  // Activations
+                                             float,                     // Clip
+                                             ElementType,               // Network precision
+                                             CPUSpecificParams,         // CPU specific params
+                                             ov::AnyMap                 // Additional config
+                                             >;
 
 class RNNCellCPUTest : public testing::WithParamInterface<RNNCellCPUParams>,
                             virtual public ov::test::SubgraphBaseTest, public CPUTestsBase {
@@ -29,33 +28,32 @@ public:
         float clip = 0.f;
         ElementType netPrecision;
         CPUSpecificParams cpuParams;
-        std::map<std::string, std::string> additionalConfig;
+        ov::AnyMap additionalConfig;
 
         std::tie(inputShapes, activations, clip, netPrecision, cpuParams, additionalConfig) = obj.param;
 
         std::ostringstream result;
         result << "IS=(";
         for (const auto& shape : inputShapes) {
-            result << CommonTestUtils::partialShape2str({shape.first}) << "_";
+            result << ov::test::utils::partialShape2str({shape.first}) << "_";
         }
         result << ")_TS=";
         for (size_t i = 0lu; i < inputShapes.front().second.size(); i++) {
             result << "{";
             for (size_t j = 0lu; j < inputShapes.size(); j++) {
-                result << CommonTestUtils::vec2str(inputShapes[j].second[i]) << (j < inputShapes.size() - 1 ? "_" : "");
+                result << ov::test::utils::vec2str(inputShapes[j].second[i]) << (j < inputShapes.size() - 1 ? "_" : "");
             }
             result << "}_";
         }
-        result << "activations=" << CommonTestUtils::vec2str(activations)  << "_";
+        result << "activations=" << ov::test::utils::vec2str(activations)  << "_";
         result << "clip=" << clip << "_";
         result << "netPrec=" << netPrecision << "_";
         result << CPUTestsBase::getTestCaseName(cpuParams);
 
         if (!additionalConfig.empty()) {
             result << "_PluginConf";
-            for (auto &item : additionalConfig) {
-                if (item.second == InferenceEngine::PluginConfigParams::YES)
-                    result << "_" << item.first << "=" << item.second;
+            for (auto& item : additionalConfig) {
+                result << "_" << item.first << "=" << item.second.as<std::string>();
             }
         }
 
@@ -69,11 +67,11 @@ protected:
         float clip = 0.f;
         ElementType netPrecision;
         CPUSpecificParams cpuParams;
-        std::map<std::string, std::string> additionalConfig;
+        ov::AnyMap additionalConfig;
 
         std::tie(inputShapes, activations, clip, netPrecision, cpuParams, additionalConfig) = this->GetParam();
         std::tie(inFmts, outFmts, priority, selectedType) = cpuParams;
-        targetDevice = CommonTestUtils::DEVICE_CPU;
+        targetDevice = ov::test::utils::DEVICE_CPU;
 
         init_input_shapes(inputShapes);
 
@@ -82,16 +80,22 @@ protected:
 
         configuration.insert(additionalConfig.begin(), additionalConfig.end());
 
-        if (additionalConfig[InferenceEngine::PluginConfigParams::KEY_ENFORCE_BF16] == InferenceEngine::PluginConfigParams::YES) {
+        auto it = additionalConfig.find(ov::hint::inference_precision.name());
+        if (it != additionalConfig.end() && it->second.as<ov::element::Type>() == ov::element::bf16) {
             selectedType = makeSelectedTypeStr(selectedType, ElementType::bf16);
         } else {
             selectedType = makeSelectedTypeStr(selectedType, netPrecision);
         }
 
-        auto params = ngraph::builder::makeDynamicParams(netPrecision, inputDynamicShapes);
-        auto paramsOuts = ngraph::helpers::convert2OutputVector(ngraph::helpers::castOps2Nodes<ov::op::v0::Parameter>(params));
+        ov::ParameterVector params;
+        ov::OutputVector paramsOuts;
+        for (auto&& shape : inputDynamicShapes) {
+            auto param = std::make_shared<ov::op::v0::Parameter>(netPrecision, shape);
+            params.push_back(param);
+            paramsOuts.push_back(param);
+        }
         std::vector<ov::Shape> WRB = {{hiddenSize, inputSize}, {hiddenSize, hiddenSize}, {hiddenSize}};
-        auto rnnCellOp = ngraph::builder::makeRNN(paramsOuts, WRB, hiddenSize, activations, {}, {}, clip);
+        auto rnnCellOp = utils::make_rnn(paramsOuts, WRB, hiddenSize, activations, {}, {}, clip);
 
         function = makeNgraphFunction(netPrecision, params, rnnCellOp, "RNNCellCPU");
     }
@@ -104,10 +108,8 @@ TEST_P(RNNCellCPUTest, CompareWithRefs) {
 
 namespace {
 /* CPU PARAMS */
-std::vector<std::map<std::string, std::string>> additionalConfig = {
-    {{InferenceEngine::PluginConfigParams::KEY_ENFORCE_BF16, InferenceEngine::PluginConfigParams::NO}},
-    {{InferenceEngine::PluginConfigParams::KEY_ENFORCE_BF16, InferenceEngine::PluginConfigParams::YES}}
-};
+std::vector<ov::AnyMap> additionalConfig = {{ov::hint::inference_precision(ov::element::f32)},
+                                            {ov::hint::inference_precision(ov::element::bf16)}};
 
 CPUSpecificParams cpuParams{{nc, nc}, {nc}, {"ref_any"}, "ref_any"};
 std::vector<std::vector<std::string>> activations = {{"relu"}, {"sigmoid"}, {"tanh"}};
@@ -162,5 +164,6 @@ INSTANTIATE_TEST_SUITE_P(smoke_dynamic, RNNCellCPUTest,
                            ::testing::Values(cpuParams),
                            ::testing::ValuesIn(additionalConfig)),
         RNNCellCPUTest::getTestCaseName);
-} // namespace
-} // namespace CPULayerTestsDefinitions
+}  // namespace
+}  // namespace test
+}  // namespace ov

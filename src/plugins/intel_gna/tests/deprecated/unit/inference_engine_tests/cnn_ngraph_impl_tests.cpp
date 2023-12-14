@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 #include <legacy/net_pass.h>
 
-#include <common_test_utils/ngraph_test_utils.hpp>
+#include <common_test_utils/ov_test_utils.hpp>
 #include <fstream>
 #include <ie_core.hpp>
 #include <ie_parameter.hpp>
@@ -25,9 +25,9 @@
 #include <ngraph/op/prelu.hpp>
 #include <ngraph/op/relu.hpp>
 #include <ngraph/op/result.hpp>
-#include <ngraph/opsets/opset3.hpp>
-#include <ngraph/opsets/opset5.hpp>
-#include <ngraph/opsets/opset8.hpp>
+#include <openvino/opsets/opset3.hpp>
+#include <openvino/opsets/opset5.hpp>
+#include <openvino/opsets/opset8.hpp>
 #include <ngraph/pass/manager.hpp>
 #include <openvino/core/model.hpp>
 #include <openvino/core/node_vector.hpp>
@@ -35,11 +35,11 @@
 #include <string>
 
 #include "cnn_network_ngraph_impl.hpp"
+#include "cnnlayer_utils.hpp"
 #include "common_test_utils/common_utils.hpp"
 #include "common_test_utils/file_utils.hpp"
 #include "ie_precision.hpp"
 #include "transformations/rt_info/primitives_priority_attribute.hpp"
-#include "cnnlayer_utils.hpp"
 
 using namespace testing;
 using namespace InferenceEngine;
@@ -47,10 +47,10 @@ using namespace InferenceEngine;
 TEST(CNNNGraphImplTests, TestReshapeWithSameShape) {
     std::shared_ptr<ngraph::Function> f;
     {
-        auto input = std::make_shared<ngraph::opset5::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1000, 4});
+        auto input = std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1000, 4});
         input->set_friendly_name("input");
-        auto shape = ngraph::opset5::Constant::create(ngraph::element::i64, {2}, {1, 4000});
-        auto reshape = std::make_shared<ngraph::opset5::Reshape>(input, shape, true);
+        auto shape = ov::op::v0::Constant::create(ngraph::element::i64, {2}, {1, 4000});
+        auto reshape = std::make_shared<ov::opset5::Reshape>(input, shape, true);
         f = std::make_shared<ngraph::Function>(ngraph::OutputVector{reshape}, ngraph::ParameterVector{input});
     }
 
@@ -81,10 +81,10 @@ TEST(CNNNGraphImplTests, TestTwoResultsFromOneTensor) {
 TEST(CNNNGraphImplTests, TestInvalidReshape) {
     std::shared_ptr<ngraph::Function> f;
     {
-        auto input = std::make_shared<ngraph::opset5::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1000, 4});
+        auto input = std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1000, 4});
         input->set_friendly_name("input");
-        auto shape = ngraph::opset5::Constant::create(ngraph::element::i64, {2}, {1, 4000});
-        auto reshape = std::make_shared<ngraph::opset5::Reshape>(input, shape, true);
+        auto shape = ov::op::v0::Constant::create(ngraph::element::i64, {2}, {1, 4000});
+        auto reshape = std::make_shared<ov::opset5::Reshape>(input, shape, true);
         f = std::make_shared<ngraph::Function>(ngraph::OutputVector{reshape}, ngraph::ParameterVector{input});
     }
 
@@ -100,18 +100,18 @@ TEST(CNNNGraphImplTests, TestInvalidReshape) {
 TEST(CNNNGraphImplTests, TestNMS5OutputNames) {
     std::shared_ptr<ngraph::Function> f;
     {
-        auto boxes = std::make_shared<ngraph::opset5::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1000, 4});
-        auto scores = std::make_shared<ngraph::opset5::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1, 1000});
-        auto max_output_boxes_per_class = ngraph::opset5::Constant::create(ngraph::element::i64, ngraph::Shape{}, {10});
-        auto iou_threshold = ngraph::opset5::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.75});
-        auto score_threshold = ngraph::opset5::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.7});
-        auto nms = std::make_shared<ngraph::opset5::NonMaxSuppression>(
+        auto boxes = std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1000, 4});
+        auto scores = std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1, 1000});
+        auto max_output_boxes_per_class = ov::op::v0::Constant::create(ngraph::element::i64, ngraph::Shape{}, {10});
+        auto iou_threshold = ov::op::v0::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.75});
+        auto score_threshold = ov::op::v0::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.7});
+        auto nms = std::make_shared<ov::opset5::NonMaxSuppression>(
             boxes,
             scores,
             max_output_boxes_per_class,
             iou_threshold,
             score_threshold,
-            ngraph::opset5::NonMaxSuppression::BoxEncodingType::CORNER,
+            ov::opset5::NonMaxSuppression::BoxEncodingType::CORNER,
             true);
         nms->set_friendly_name("nms");
         f = std::make_shared<ngraph::Function>(ngraph::OutputVector{nms->output(0), nms->output(1), nms->output(2)},
@@ -763,11 +763,11 @@ TEST(CNNNGraphImplTests, ReadMeanImageFromCNNNetReader) {
     auto f = network.getFunction();
 
     std::shared_ptr<ngraph::Function> f_ref;
-    auto data = std::make_shared<ngraph::opset1::Parameter>(ngraph::element::f32, ngraph::Shape{1, 3, 22, 22});
+    auto data = std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ngraph::Shape{1, 3, 22, 22});
     {
-        auto mean_image = ngraph::opset1::Constant::create(ngraph::element::f32, ngraph::Shape{3, 22, 22}, {1});
-        auto sub = std::make_shared<ngraph::opset1::Subtract>(data, mean_image);
-        auto relu = std::make_shared<ngraph::opset1::Relu>(sub);
+        auto mean_image = ov::op::v0::Constant::create(ngraph::element::f32, ngraph::Shape{3, 22, 22}, {1});
+        auto sub = std::make_shared<ov::op::v1::Subtract>(data, mean_image);
+        auto relu = std::make_shared<ov::op::v0::Relu>(sub);
         f_ref = std::make_shared<ngraph::Function>(ngraph::NodeVector{relu}, ngraph::ParameterVector{data});
     }
 
@@ -846,11 +846,10 @@ TEST(CNNNGraphImplTests, ReadMeanValueFromCNNNetReader) {
 
     std::shared_ptr<ngraph::Function> f_ref;
     {
-        auto data = std::make_shared<ngraph::opset1::Parameter>(ngraph::element::f32, ngraph::Shape{1, 3, 22, 22});
-        auto mean_image =
-            ngraph::opset1::Constant::create(ngraph::element::f32, ngraph::Shape{3, 1, 1}, {1.1, 2.2, 3.3});
-        auto sub = std::make_shared<ngraph::opset1::Subtract>(data, mean_image);
-        auto relu = std::make_shared<ngraph::opset1::Relu>(sub);
+        auto data = std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ngraph::Shape{1, 3, 22, 22});
+        auto mean_image = ov::op::v0::Constant::create(ngraph::element::f32, ngraph::Shape{3, 1, 1}, {1.1, 2.2, 3.3});
+        auto sub = std::make_shared<ov::op::v1::Subtract>(data, mean_image);
+        auto relu = std::make_shared<ov::op::v0::Relu>(sub);
         f_ref = std::make_shared<ngraph::Function>(ngraph::NodeVector{relu}, ngraph::ParameterVector{data});
     }
 
@@ -1073,15 +1072,15 @@ TEST(CNNNGraphImplTests, TestCheckStats) {
 TEST(CNNNGraphImplTests, CanSetBatchReadValue) {
     std::shared_ptr<ngraph::Function> ngraph;
     {
-        auto input = std::make_shared<ngraph::opset3::Parameter>(ngraph::element::f32, ngraph::Shape{1, 2});
-        auto constant = std::make_shared<ngraph::opset3::Constant>(ngraph::element::f32,
+        auto input = std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ngraph::Shape{1, 2});
+        auto constant = std::make_shared<ov::op::v0::Constant>(ngraph::element::f32,
                                                                    ngraph::Shape{1, 2},
                                                                    std::vector<float>{1, 2});
 
-        auto read_value = std::make_shared<ngraph::opset3::ReadValue>(constant, "variable_id");
-        auto assign = std::make_shared<ngraph::opset3::Assign>(read_value, "variable_id");
+        auto read_value = std::make_shared<ov::opset3::ReadValue>(constant, "variable_id");
+        auto assign = std::make_shared<ov::opset3::Assign>(read_value, "variable_id");
         assign->add_control_dependency(read_value);
-        auto add = std::make_shared<ngraph::opset3::Add>(input, read_value);
+        auto add = std::make_shared<ov::opset3::Add>(input, read_value);
         auto result = std::make_shared<ngraph::op::Result>(add);
 
         ngraph::ParameterVector params = {input};
@@ -1102,10 +1101,10 @@ TEST(CNNNGraphImplTests, addSameOutput) {
     {
         ngraph::PartialShape shape({1, 3, 22, 22});
         ngraph::element::Type type(ngraph::element::Type_t::f32);
-        auto param = std::make_shared<ngraph::opset3::Parameter>(type, shape);
-        auto relu = std::make_shared<ngraph::opset3::Relu>(param);
-        auto shapeof = std::make_shared<ngraph::opset3::ShapeOf>(param);
-        auto reshape = std::make_shared<ngraph::opset3::Reshape>(relu, shapeof, true);
+        auto param = std::make_shared<ov::op::v0::Parameter>(type, shape);
+        auto relu = std::make_shared<ov::opset3::Relu>(param);
+        auto shapeof = std::make_shared<ov::opset3::ShapeOf>(param);
+        auto reshape = std::make_shared<ov::opset3::Reshape>(relu, shapeof, true);
         reshape->set_friendly_name("reshape");
         auto result = std::make_shared<ngraph::op::Result>(reshape);
 
@@ -1129,12 +1128,12 @@ TEST(CNNNGraphImplTests, addOutput) {
     {
         ngraph::PartialShape shape({1, 3, 22, 22});
         ngraph::element::Type type(ngraph::element::Type_t::f32);
-        auto param = std::make_shared<ngraph::opset3::Parameter>(type, shape);
-        auto relu = std::make_shared<ngraph::opset3::Relu>(param);
-        auto shapeof = std::make_shared<ngraph::opset3::ShapeOf>(param);
-        auto reshape = std::make_shared<ngraph::opset3::Reshape>(relu, shapeof, true);
+        auto param = std::make_shared<ov::op::v0::Parameter>(type, shape);
+        auto relu = std::make_shared<ov::opset3::Relu>(param);
+        auto shapeof = std::make_shared<ov::opset3::ShapeOf>(param);
+        auto reshape = std::make_shared<ov::opset3::Reshape>(relu, shapeof, true);
         reshape->set_friendly_name("reshape");
-        auto relu2 = std::make_shared<ngraph::opset3::Relu>(reshape);
+        auto relu2 = std::make_shared<ov::opset3::Relu>(reshape);
         auto result = std::make_shared<ngraph::op::Result>(relu2);
 
         ngraph::ParameterVector params = {param};
@@ -1157,9 +1156,9 @@ TEST(CNNNGraphImplTests, addOutputForParameter) {
     {
         ngraph::PartialShape shape({1, 3, 22, 22});
         ngraph::element::Type type(ngraph::element::Type_t::f32);
-        auto param = std::make_shared<ngraph::opset3::Parameter>(type, shape);
+        auto param = std::make_shared<ov::op::v0::Parameter>(type, shape);
         param->set_friendly_name("param");
-        auto relu = std::make_shared<ngraph::opset3::Relu>(param);
+        auto relu = std::make_shared<ov::opset3::Relu>(param);
         auto result = std::make_shared<ngraph::op::Result>(relu);
 
         ngraph::ParameterVector params = {param};
@@ -1856,27 +1855,27 @@ TEST(CNNNGraphImplTests, SaveOriginalResultNameForMultiOutputOpOpset6) {
 TEST(CNNNGraphImplTests, CheckUniqueNames) {
     std::shared_ptr<ngraph::Function> f;
     {
-        auto boxes = std::make_shared<ngraph::opset5::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1000, 4});
+        auto boxes = std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1000, 4});
         boxes->set_friendly_name("boxes");
-        auto scores = std::make_shared<ngraph::opset5::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1, 1000});
+        auto scores = std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1, 1000});
         scores->set_friendly_name("scores");
-        auto max_output_boxes_per_class = ngraph::opset5::Constant::create(ngraph::element::i64, ngraph::Shape{}, {10});
-        auto iou_threshold = ngraph::opset5::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.75});
-        auto score_threshold = ngraph::opset5::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.7});
-        auto nms = std::make_shared<ngraph::opset5::NonMaxSuppression>(
+        auto max_output_boxes_per_class = ov::op::v0::Constant::create(ngraph::element::i64, ngraph::Shape{}, {10});
+        auto iou_threshold = ov::op::v0::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.75});
+        auto score_threshold = ov::op::v0::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.7});
+        auto nms = std::make_shared<ov::opset5::NonMaxSuppression>(
             boxes,
             scores,
             max_output_boxes_per_class,
             iou_threshold,
             score_threshold,
-            ngraph::opset5::NonMaxSuppression::BoxEncodingType::CORNER,
+            ov::opset5::NonMaxSuppression::BoxEncodingType::CORNER,
             true);
 
-        auto result1 = std::make_shared<ngraph::opset5::Result>(nms->output(0));
+        auto result1 = std::make_shared<ov::op::v0::Result>(nms->output(0));
         result1->set_friendly_name("result1");
-        auto result2 = std::make_shared<ngraph::opset5::Result>(nms->output(1));
+        auto result2 = std::make_shared<ov::op::v0::Result>(nms->output(1));
         result2->set_friendly_name("result2");
-        auto result3 = std::make_shared<ngraph::opset5::Result>(nms->output(2));
+        auto result3 = std::make_shared<ov::op::v0::Result>(nms->output(2));
         result3->set_friendly_name("result3");
         nms->set_friendly_name("nms");
         f = std::make_shared<ngraph::Function>(ngraph::ResultVector{result1, result2, result3},
@@ -1889,27 +1888,27 @@ TEST(CNNNGraphImplTests, CheckUniqueNames) {
 TEST(CNNNGraphImplTests, CheckNonUniqueParameterName) {
     std::shared_ptr<ngraph::Function> f;
     {
-        auto boxes = std::make_shared<ngraph::opset5::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1000, 4});
+        auto boxes = std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1000, 4});
         boxes->set_friendly_name("boxes");
-        auto scores = std::make_shared<ngraph::opset5::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1, 1000});
+        auto scores = std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1, 1000});
         scores->set_friendly_name("boxes");
-        auto max_output_boxes_per_class = ngraph::opset5::Constant::create(ngraph::element::i64, ngraph::Shape{}, {10});
-        auto iou_threshold = ngraph::opset5::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.75});
-        auto score_threshold = ngraph::opset5::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.7});
-        auto nms = std::make_shared<ngraph::opset5::NonMaxSuppression>(
+        auto max_output_boxes_per_class = ov::op::v0::Constant::create(ngraph::element::i64, ngraph::Shape{}, {10});
+        auto iou_threshold = ov::op::v0::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.75});
+        auto score_threshold = ov::op::v0::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.7});
+        auto nms = std::make_shared<ov::opset5::NonMaxSuppression>(
             boxes,
             scores,
             max_output_boxes_per_class,
             iou_threshold,
             score_threshold,
-            ngraph::opset5::NonMaxSuppression::BoxEncodingType::CORNER,
+            ov::opset5::NonMaxSuppression::BoxEncodingType::CORNER,
             true);
 
-        auto result1 = std::make_shared<ngraph::opset5::Result>(nms->output(0));
+        auto result1 = std::make_shared<ov::op::v0::Result>(nms->output(0));
         result1->set_friendly_name("result1");
-        auto result2 = std::make_shared<ngraph::opset5::Result>(nms->output(1));
+        auto result2 = std::make_shared<ov::op::v0::Result>(nms->output(1));
         result2->set_friendly_name("result2");
-        auto result3 = std::make_shared<ngraph::opset5::Result>(nms->output(2));
+        auto result3 = std::make_shared<ov::op::v0::Result>(nms->output(2));
         result3->set_friendly_name("result3");
         nms->set_friendly_name("nms");
         f = std::make_shared<ngraph::Function>(ngraph::ResultVector{result1, result2, result3},
@@ -1922,27 +1921,27 @@ TEST(CNNNGraphImplTests, CheckNonUniqueParameterName) {
 TEST(CNNNGraphImplTests, CheckNonUniqueResultName) {
     std::shared_ptr<ngraph::Function> f;
     {
-        auto boxes = std::make_shared<ngraph::opset5::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1000, 4});
+        auto boxes = std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1000, 4});
         boxes->set_friendly_name("nms.1");
-        auto scores = std::make_shared<ngraph::opset5::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1, 1000});
+        auto scores = std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1, 1000});
         scores->set_friendly_name("scores");
-        auto max_output_boxes_per_class = ngraph::opset5::Constant::create(ngraph::element::i64, ngraph::Shape{}, {10});
-        auto iou_threshold = ngraph::opset5::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.75});
-        auto score_threshold = ngraph::opset5::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.7});
-        auto nms = std::make_shared<ngraph::opset5::NonMaxSuppression>(
+        auto max_output_boxes_per_class = ov::op::v0::Constant::create(ngraph::element::i64, ngraph::Shape{}, {10});
+        auto iou_threshold = ov::op::v0::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.75});
+        auto score_threshold = ov::op::v0::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.7});
+        auto nms = std::make_shared<ov::opset5::NonMaxSuppression>(
             boxes,
             scores,
             max_output_boxes_per_class,
             iou_threshold,
             score_threshold,
-            ngraph::opset5::NonMaxSuppression::BoxEncodingType::CORNER,
+            ov::opset5::NonMaxSuppression::BoxEncodingType::CORNER,
             true);
 
-        auto result1 = std::make_shared<ngraph::opset5::Result>(nms->output(0));
+        auto result1 = std::make_shared<ov::op::v0::Result>(nms->output(0));
         result1->set_friendly_name("result1");
-        auto result2 = std::make_shared<ngraph::opset5::Result>(nms->output(1));
+        auto result2 = std::make_shared<ov::op::v0::Result>(nms->output(1));
         result2->set_friendly_name("result2");
-        auto result3 = std::make_shared<ngraph::opset5::Result>(nms->output(2));
+        auto result3 = std::make_shared<ov::op::v0::Result>(nms->output(2));
         result3->set_friendly_name("result3");
         nms->set_friendly_name("nms");
         f = std::make_shared<ngraph::Function>(ngraph::ResultVector{result1, result2, result3},
@@ -1955,25 +1954,25 @@ TEST(CNNNGraphImplTests, CheckNonUniqueResultName) {
 TEST(CNNNGraphImplTests, CheckNonUniqueNewResultName) {
     std::shared_ptr<ngraph::Function> f;
     {
-        auto boxes = std::make_shared<ngraph::opset5::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1000, 4});
+        auto boxes = std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1000, 4});
         boxes->set_friendly_name("nms.1");
-        auto scores = std::make_shared<ngraph::opset5::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1, 1000});
+        auto scores = std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ngraph::Shape{1, 1, 1000});
         scores->set_friendly_name("scores");
-        auto max_output_boxes_per_class = ngraph::opset5::Constant::create(ngraph::element::i64, ngraph::Shape{}, {10});
-        auto iou_threshold = ngraph::opset5::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.75});
-        auto score_threshold = ngraph::opset5::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.7});
-        auto nms = std::make_shared<ngraph::opset5::NonMaxSuppression>(
+        auto max_output_boxes_per_class = ov::op::v0::Constant::create(ngraph::element::i64, ngraph::Shape{}, {10});
+        auto iou_threshold = ov::op::v0::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.75});
+        auto score_threshold = ov::op::v0::Constant::create(ngraph::element::f32, ngraph::Shape{}, {0.7});
+        auto nms = std::make_shared<ov::opset5::NonMaxSuppression>(
             boxes,
             scores,
             max_output_boxes_per_class,
             iou_threshold,
             score_threshold,
-            ngraph::opset5::NonMaxSuppression::BoxEncodingType::CORNER,
+            ov::opset5::NonMaxSuppression::BoxEncodingType::CORNER,
             true);
 
-        auto result1 = std::make_shared<ngraph::opset5::Result>(nms->output(0));
+        auto result1 = std::make_shared<ov::op::v0::Result>(nms->output(0));
         result1->set_friendly_name("result1");
-        auto result3 = std::make_shared<ngraph::opset5::Result>(nms->output(2));
+        auto result3 = std::make_shared<ov::op::v0::Result>(nms->output(2));
         result3->set_friendly_name("result3");
         nms->set_friendly_name("nms");
         f = std::make_shared<ngraph::Function>(ngraph::ResultVector{result1, result3},
@@ -1988,38 +1987,38 @@ TEST(CNNNGraphImplTests, CheckNonUniqueNewResultName) {
 TEST(CNNNGraphImplTests, RemoveLoopDanglingParametersIfConcatEmptyTensor) {
     CNNNetwork network;
 
-    auto trip_count = std::make_shared<ov::opset8::Constant>(ov::element::i64, ov::Shape{}, 10);
-    auto condition = std::make_shared<ov::opset8::Constant>(ov::element::boolean, ov::Shape{}, true);
+    auto trip_count = std::make_shared<ov::op::v0::Constant>(ov::element::i64, ov::Shape{}, 10);
+    auto condition = std::make_shared<ov::op::v0::Constant>(ov::element::boolean, ov::Shape{}, true);
 
-    auto a = std::make_shared<ov::opset8::Parameter>(ov::element::f32, ov::Shape{2, 2});
-    auto ai = std::make_shared<ov::opset8::Parameter>(ov::element::f32, ov::Shape{2, 2});
-    auto b = std::make_shared<ov::opset8::Parameter>(ov::element::f32, ov::Shape{2});
+    auto a = std::make_shared<ov::op::v0::Parameter>(ov::element::f32, ov::Shape{2, 2});
+    auto ai = std::make_shared<ov::op::v0::Parameter>(ov::element::f32, ov::Shape{2, 2});
+    auto b = std::make_shared<ov::op::v0::Parameter>(ov::element::f32, ov::Shape{2});
     auto b_broadcast =
-        std::make_shared<ov::opset8::Broadcast>(b, ov::opset8::Constant::create(ngraph::element::i64, {2}, {0, 2}));
-    auto bi = std::make_shared<ov::opset8::Parameter>(ov::element::f32, ov::Shape{0, 2});
+        std::make_shared<ov::op::v3::Broadcast>(b, ov::op::v0::Constant::create(ngraph::element::i64, {2}, {0, 2}));
+    auto bi = std::make_shared<ov::op::v0::Parameter>(ov::element::f32, ov::Shape{0, 2});
     {
-        auto concat = std::make_shared<ov::opset8::Concat>(ov::NodeVector{ai, bi}, 0);
+        auto concat = std::make_shared<ov::op::v0::Concat>(ov::NodeVector{ai, bi}, 0);
         auto body = std::make_shared<ov::Model>(ov::OutputVector{condition, concat}, ov::ParameterVector{ai, bi});
-        auto loop = std::make_shared<ov::opset8::Loop>(trip_count, condition);
+        auto loop = std::make_shared<ov::op::v5::Loop>(trip_count, condition);
         loop->set_special_body_ports({-1, 0});
         loop->set_function(body);
         loop->set_invariant_input(ai, a);
         loop->set_invariant_input(bi, b_broadcast);
 
-        auto loop_res = std::make_shared<ov::opset8::Result>(loop->get_iter_value(concat));
+        auto loop_res = std::make_shared<ov::op::v0::Result>(loop->get_iter_value(concat));
         auto model = std::make_shared<ov::Model>(ov::OutputVector{loop_res}, ov::ParameterVector{a, b});
 
         network = CNNNetwork(model);
     }
     {
-        auto concat = std::make_shared<ov::opset8::Concat>(ov::NodeVector{ai}, 0);
+        auto concat = std::make_shared<ov::op::v0::Concat>(ov::NodeVector{ai}, 0);
         auto body = std::make_shared<ov::Model>(ov::OutputVector{condition, concat}, ov::ParameterVector{ai});
-        auto loop = std::make_shared<ov::opset8::Loop>(trip_count, condition);
+        auto loop = std::make_shared<ov::op::v5::Loop>(trip_count, condition);
         loop->set_special_body_ports({-1, 0});
         loop->set_function(body);
         loop->set_invariant_input(ai, a);
 
-        auto loop_res = std::make_shared<ov::opset8::Result>(loop->get_iter_value(concat));
+        auto loop_res = std::make_shared<ov::op::v0::Result>(loop->get_iter_value(concat));
         auto model_ref = std::make_shared<ov::Model>(ov::OutputVector{loop_res}, ov::ParameterVector{a, b});
 
         const auto fc = FunctionsComparator::with_default()

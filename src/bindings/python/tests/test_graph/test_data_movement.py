@@ -5,7 +5,7 @@
 import numpy as np
 
 import openvino.runtime.opset8 as ov
-from openvino.runtime import Type, Shape
+from openvino import Type, Shape
 
 
 def test_reverse_sequence():
@@ -21,19 +21,6 @@ def test_reverse_sequence():
     assert model.get_type_name() == "ReverseSequence"
     assert model.get_output_size() == 1
     assert list(model.get_output_shape(0)) == [2, 3, 4, 2]
-    assert model.get_output_element_type(0) == Type.i32
-
-
-def test_pad_edge():
-    pads_begin = np.array([0, 1], dtype=np.int32)
-    pads_end = np.array([2, 3], dtype=np.int32)
-
-    input_param = ov.parameter((3, 4), name="input", dtype=np.int32)
-    model = ov.pad(input_param, pads_begin, pads_end, "edge")
-
-    assert model.get_type_name() == "Pad"
-    assert model.get_output_size() == 1
-    assert list(model.get_output_shape(0)) == [5, 8]
     assert model.get_output_element_type(0) == Type.i32
 
 

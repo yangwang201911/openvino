@@ -7,9 +7,14 @@
 #include "ie_core.hpp"
 #include "ngraph/node.hpp"
 
+#include "shared_test_classes/base/utils/ranges.hpp"
+
 namespace ov {
 namespace test {
 namespace utils {
+
+void set_const_ranges(double _min, double _max);
+void reset_const_ranges();
 
 using InputsMap = std::map<ov::NodeTypeInfo, std::function<ov::runtime::Tensor(
         const std::shared_ptr<ov::Node>& node,

@@ -6,7 +6,9 @@
 
 #include <fstream>
 
+#include "openvino/core/any.hpp"
 #include "openvino/frontend/exception.hpp"
+#include "openvino/util/common_util.hpp"
 #include "openvino/util/file_util.hpp"
 #include "schema_generated.h"
 
@@ -16,18 +18,29 @@ namespace tensorflow_lite {
 class DecoderFlatBuffer;
 
 struct TensorInfo {
-    int64_t input_idx, output_idx;
     const tflite::Tensor* tensor;
     const tflite::Buffer* buffer;
 };
 
+template <typename T>
+std::basic_string<T> get_model_extension() {}
+template <>
+std::basic_string<char> get_model_extension<char>();
+#if defined(OPENVINO_ENABLE_UNICODE_PATH_SUPPORT) && defined(_WIN32)
+template <>
+std::basic_string<wchar_t> get_model_extension<wchar_t>();
+#endif
+
 class GraphIteratorFlatBuffer {
     size_t node_index = 0;
     std::vector<uint8_t> m_data;
-    std::vector<const tflite::Operator*> m_nodes;
-    const tflite::Model* m_model;
+    std::vector<ov::Any> m_nodes;
+    const tflite::Model* m_model{};
+    std::vector<const tflite::SubGraph*> m_subgraphs;
+    const tflite::SubGraph* m_graph{};
 
 public:
+    GraphIteratorFlatBuffer() = default;
     explicit GraphIteratorFlatBuffer(const std::string& path);
 
 #ifdef OPENVINO_ENABLE_UNICODE_PATH_SUPPORT
@@ -37,6 +50,34 @@ public:
     using Ptr = std::shared_ptr<GraphIteratorFlatBuffer>;
 
     ~GraphIteratorFlatBuffer() = default;
+
+    /// Verifies file is supported
+    template <typename T>
+    static bool is_supported(const std::basic_string<T>& path) {
+        try {
+            if (!ov::util::ends_with<T>(path, get_model_extension<T>())) {
+                return false;
+            }
+            const std::streamsize offset_size = static_cast<std::streamsize>(sizeof(::flatbuffers::uoffset_t));
+            std::streamsize file_size = util::file_size(path);
+            // Skip files which less than size of file identifier
+            if (file_size < offset_size) {
+                return false;
+            }
+            std::ifstream tflite_stream(path, std::ios::in | std::ifstream::binary);
+            char buf[offset_size * 2] = {};
+            tflite_stream.read(buf, offset_size * 2);
+            // If we have enough readed bytes - try to detect prefixed identifier, else try without size prefix
+            if ((tflite_stream.gcount() == offset_size * 2) && ::tflite::ModelBufferHasIdentifier(buf + offset_size)) {
+                return true;
+            } else if (tflite_stream.gcount() >= offset_size && ::tflite::ModelBufferHasIdentifier(buf)) {
+                return true;
+            }
+            return false;
+        } catch (...) {
+            return false;
+        }
+    }
 
     /// Set iterator to the start position
     void reset() {
@@ -58,6 +99,14 @@ public:
 
     /// Return Decoder for the current node that iterator points to
     std::shared_ptr<ov::frontend::tensorflow_lite::DecoderFlatBuffer> get_decoder() const;
+
+    /// \brief Returns the number of sub-graphs that can be enumerated with get_subgraph
+    size_t get_subgraph_size() const;
+
+    /// \brief Returns iterator for a subgraph created on demand
+    /// If there is no query for specific sub-graph iterator shouldn't be created
+    /// idx should be in range 0..get_subgraph_size()-1
+    std::shared_ptr<GraphIteratorFlatBuffer> get_subgraph(const size_t& idx) const;
 };
 
 }  // namespace tensorflow_lite

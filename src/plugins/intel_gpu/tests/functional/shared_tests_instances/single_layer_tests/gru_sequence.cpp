@@ -27,9 +27,9 @@ namespace {
     std::vector<bool> linear_before_reset = {true, false};
     std::vector<float> clip{0.f};
     std::vector<float> clip_non_zeros{0.7f};
-    std::vector<ngraph::op::RecurrentSequenceDirection> direction = {ngraph::op::RecurrentSequenceDirection::FORWARD,
-                                                                     ngraph::op::RecurrentSequenceDirection::REVERSE,
-                                                                     ngraph::op::RecurrentSequenceDirection::BIDIRECTIONAL
+    std::vector<ov::op::RecurrentSequenceDirection> direction = {ov::op::RecurrentSequenceDirection::FORWARD,
+                                                                     ov::op::RecurrentSequenceDirection::REVERSE,
+                                                                     ov::op::RecurrentSequenceDirection::BIDIRECTIONAL
     };
     std::vector<InferenceEngine::Precision> netPrecisions = {InferenceEngine::Precision::FP32,
                                                              InferenceEngine::Precision::FP16};
@@ -45,8 +45,25 @@ namespace {
                                     ::testing::ValuesIn(clip),
                                     ::testing::ValuesIn(linear_before_reset),
                                     ::testing::ValuesIn(direction),
+                                    ::testing::Values(ngraph::helpers::InputLayerType::CONSTANT),
                                     ::testing::ValuesIn(netPrecisions),
-                                    ::testing::Values(CommonTestUtils::DEVICE_GPU)),
+                                    ::testing::Values(ov::test::utils::DEVICE_GPU)),
+                            GRUSequenceTest::getTestCaseName);
+
+    INSTANTIATE_TEST_SUITE_P(GRUSequenceCommonZeroClipNonConstantWRB, GRUSequenceTest,
+                            ::testing::Combine(
+                                    ::testing::Values(ngraph::helpers::SequenceTestsMode::PURE_SEQ),
+                                    ::testing::ValuesIn(seq_lengths_zero_clip),
+                                    ::testing::ValuesIn(batch),
+                                    ::testing::ValuesIn(hidden_size),
+                                    // ::testing::ValuesIn(input_size), // hardcoded to 10 due to Combine supports up to 10 args
+                                    ::testing::ValuesIn(activations),
+                                    ::testing::ValuesIn(clip),
+                                    ::testing::ValuesIn(linear_before_reset),
+                                    ::testing::ValuesIn(direction),
+                                    ::testing::Values(ngraph::helpers::InputLayerType::PARAMETER),
+                                    ::testing::ValuesIn(netPrecisions),
+                                    ::testing::Values(ov::test::utils::DEVICE_GPU)),
                             GRUSequenceTest::getTestCaseName);
 
     INSTANTIATE_TEST_SUITE_P(GRUSequenceCommonClip, GRUSequenceTest,
@@ -60,8 +77,9 @@ namespace {
                                     ::testing::ValuesIn(clip_non_zeros),
                                     ::testing::ValuesIn(linear_before_reset),
                                     ::testing::ValuesIn(direction),
+                                    ::testing::Values(ngraph::helpers::InputLayerType::CONSTANT),
                                     ::testing::ValuesIn(netPrecisions),
-                                    ::testing::Values(CommonTestUtils::DEVICE_GPU)),
+                                    ::testing::Values(ov::test::utils::DEVICE_GPU)),
                             GRUSequenceTest::getTestCaseName);
 
 }  // namespace

@@ -13,7 +13,7 @@ namespace node {
 
 class CumSum : public Node {
 public:
-    CumSum(const std::shared_ptr<ngraph::Node>& op, const GraphContext::CPtr context);
+    CumSum(const std::shared_ptr<ov::Node>& op, const GraphContext::CPtr context);
 
     void getSupportedDescriptors() override {};
     void initSupportedPrimitiveDescriptors() override;
@@ -23,7 +23,7 @@ public:
     bool needPrepareParams() const override;
     void executeDynamicImpl(dnnl::stream strm) override;
 
-    static bool isSupportedOperation(const std::shared_ptr<const ngraph::Node>& op, std::string& errorMessage) noexcept;
+    static bool isSupportedOperation(const std::shared_ptr<const ov::Node>& op, std::string& errorMessage) noexcept;
 
 private:
     template <typename dataType>
@@ -38,7 +38,7 @@ private:
 
     inline size_t getStartOffset(const std::vector<size_t> &forStartOffset, const std::vector<size_t>& strides) const;
 
-    size_t getAxis(const Memory& _axis, const Memory& _data) const;
+    size_t getAxis(const IMemory& _axis, const IMemory& _data) const;
 
     enum { CUM_SUM_DATA, AXIS, numOfInputs };
     bool exclusive;
@@ -46,7 +46,7 @@ private:
     size_t numOfDims;
     size_t axis = 0;
 
-    InferenceEngine::Precision dataPrecision;
+    ov::element::Type dataPrecision;
     std::string errorPrefix;
 
     template<typename T>

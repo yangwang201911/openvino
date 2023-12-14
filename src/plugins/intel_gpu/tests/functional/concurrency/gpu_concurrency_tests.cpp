@@ -2,35 +2,37 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#include <string>
-#include <utility>
-#include <vector>
-#include <memory>
 
-#include "openvino/runtime/core.hpp"
-
-#include <gpu/gpu_config.hpp>
-#include <common_test_utils/test_common.hpp>
-#include <functional_test_utils/plugin_cache.hpp>
-#include "ngraph_functions/subgraph_builders.hpp"
+#include "common_test_utils/test_common.hpp"
+#include "functional_test_utils/plugin_cache.hpp"
+#include "ov_models/subgraph_builders.hpp"
 #include "functional_test_utils/blob_utils.hpp"
 #include "openvino/core/preprocess/pre_post_process.hpp"
 #include "transformations/utils/utils.hpp"
 #include "common_test_utils/file_utils.hpp"
 #include "openvino/runtime/intel_gpu/properties.hpp"
+#include "common_test_utils/ov_tensor_utils.hpp"
+#include "common_test_utils/data_utils.hpp"
+#include "openvino/runtime/core.hpp"
+#include "openvino/runtime/infer_request.hpp"
+#include "openvino/runtime/compiled_model.hpp"
+#include "functional_test_utils/ov_plugin_cache.hpp"
+#include "common_test_utils/subgraph_builders/split_multi_conv_concat.hpp"
+#include "common_test_utils/subgraph_builders/ti_with_lstm_cell.hpp"
+#include "common_test_utils/subgraph_builders/detection_output.hpp"
+#include "common_test_utils/subgraph_builders/multi_single_conv.hpp"
 
-using namespace ::testing;
-
+namespace {
 using ConcurrencyTestParams = std::tuple<size_t,   // number of streams
                                          size_t>;  // number of requests
 
-class OVConcurrencyTest : public CommonTestUtils::TestsCommon,
-    public testing::WithParamInterface<ConcurrencyTestParams> {
+class OVConcurrencyTest : public ov::test::TestsCommon,
+                          public testing::WithParamInterface<ConcurrencyTestParams> {
     void SetUp() override {
         std::tie(num_streams, num_requests) = this->GetParam();
-        fn_ptrs = {ngraph::builder::subgraph::makeSplitMultiConvConcat(),
-                   ngraph::builder::subgraph::makeMultiSingleConv(),
-                   ngraph::builder::subgraph::makeTIwithLSTMcell()};
+        fn_ptrs = {ov::test::utils::make_split_multi_conv_concat(),
+                   ov::test::utils::make_multi_single_conv(),
+                   ov::test::utils::make_ti_with_lstm_cell()};
     };
 public:
     static std::string getTestCaseName(const testing::TestParamInfo<ConcurrencyTestParams>& obj) {
@@ -41,111 +43,98 @@ public:
     }
 
     void execute(bool is_caching_test = false) {
-        auto ie = ov::Core();
+        auto core = ov::test::utils::PluginCache::get().core();
 
         std::string cacheFolderName;
         if (is_caching_test) {
             std::stringstream ss;
             ss << "OVConcurrencyTest_nstreams_" << num_streams << "_nireq_" << num_requests;
             cacheFolderName = ss.str();
-            CommonTestUtils::removeFilesWithExt(cacheFolderName, "blob");
-            CommonTestUtils::removeFilesWithExt(cacheFolderName, "cl_cache");
-            CommonTestUtils::removeDir(cacheFolderName);
-            ie.set_property(ov::cache_dir(cacheFolderName));
-            ie.set_property(ov::intel_gpu::enable_loop_unrolling(false));
+            ov::test::utils::removeFilesWithExt(cacheFolderName, "blob");
+            ov::test::utils::removeFilesWithExt(cacheFolderName, "cl_cache");
+            ov::test::utils::removeDir(cacheFolderName);
+            core->set_property(ov::cache_dir(cacheFolderName));
+            core->set_property(ov::test::utils::DEVICE_GPU, ov::intel_gpu::enable_loop_unrolling(false));
         }
 
-        ov::ResultVector outputs;
-        std::vector<ov::InferRequest> irs;
-        std::vector<std::vector<uint8_t>> ref;
-        std::vector<size_t> outElementsCount;
+        std::vector<std::pair<std::shared_ptr<ov::Model>, ov::InferRequest>> irs;
+        std::vector<ov::InferRequest> irs_ref;
 
         for (size_t i = 0; i < fn_ptrs.size(); ++i) {
             auto fn = fn_ptrs[i];
-
             ov::CompiledModel exec_net;
-
             if (is_caching_test) {
                 {
-                    auto _dummy_exec_net = ie.compile_model(fn_ptrs[i], CommonTestUtils::DEVICE_GPU,
+                    auto _dummy_exec_net = core->compile_model(fn, ov::test::utils::DEVICE_GPU,
                                                     ov::num_streams(ov::streams::Num(num_streams)), ov::hint::inference_precision(ov::element::f32));
                 }
                 {
-                    exec_net = ie.compile_model(fn_ptrs[i], CommonTestUtils::DEVICE_GPU,
+                    exec_net = core->compile_model(fn, ov::test::utils::DEVICE_GPU,
                                                     ov::num_streams(ov::streams::Num(num_streams)), ov::hint::inference_precision(ov::element::f32));
                 }
             } else {
-                exec_net = ie.compile_model(fn_ptrs[i], CommonTestUtils::DEVICE_GPU,
+                exec_net = core->compile_model(fn, ov::test::utils::DEVICE_GPU,
                                                 ov::num_streams(ov::streams::Num(num_streams)), ov::hint::inference_precision(ov::element::f32));
             }
 
-            auto output = fn_ptrs[i]->get_results().at(0);
-
             for (size_t j = 0; j < num_streams * num_requests; j++) {
-                outputs.push_back(output);
-
                 auto inf_req = exec_net.create_infer_request();
-                irs.push_back(inf_req);
+                irs.push_back({fn, inf_req});
 
-                std::vector<std::vector<uint8_t>> inputs;
-                for (size_t param_idx = 0; param_idx < fn_ptrs[i]->get_parameters().size(); ++param_idx) {
-                    auto input = fn_ptrs[i]->get_parameters().at(param_idx);
-                    auto tensor = FuncTestUtils::create_and_fill_tensor(input->get_element_type(), input->get_shape());
+                auto compiled_model_ref = core->compile_model(fn, ov::test::utils::DEVICE_TEMPLATE);
+                auto inf_req_ref = compiled_model_ref.create_infer_request();
+                irs_ref.push_back(inf_req_ref);
+
+                std::vector<ov::Tensor> input_tensors;
+                for (size_t param_idx = 0; param_idx < fn->get_parameters().size(); ++param_idx) {
+                    auto input = fn->get_parameters().at(param_idx);
+                    auto tensor = ov::test::utils::create_and_fill_tensor(input->get_element_type(), input->get_shape());
                     inf_req.set_tensor(input, tensor);
-
-                    const auto in_tensor = inf_req.get_tensor(input);
-                    const auto tensorSize = in_tensor.get_byte_size();
-                    const auto inBlobBuf = static_cast<uint8_t*>(in_tensor.data());
-                    std::vector<uint8_t> inData(inBlobBuf, inBlobBuf + tensorSize);
-                    inputs.emplace_back(inData);
+                    inf_req_ref.set_tensor(input, tensor);
                 }
-
-                auto reOutData = ngraph::helpers::interpreterFunction(fn_ptrs[i], inputs).front().second;
-                ref.push_back(reOutData);
-                outElementsCount.push_back(ov::shape_size(fn_ptrs[i]->get_output_shape(0)));
+                inf_req_ref.infer();
             }
         }
 
         const int niter = 10;
         for (int i = 0; i < niter; i++) {
             for (auto ir : irs) {
-                ir.start_async();
+                ir.second.start_async();
             }
 
             for (auto ir : irs) {
-                ir.wait();
+                ir.second.wait();
             }
         }
 
-        auto thr = FuncTestUtils::GetComparisonThreshold(InferenceEngine::Precision::FP32);
         for (size_t i = 0; i < irs.size(); ++i) {
-            const auto &refBuffer = ref[i].data();
-            ASSERT_EQ(outElementsCount[i], irs[i].get_tensor(outputs[i]).get_size());
-            FuncTestUtils::compareRawBuffers(irs[i].get_tensor(outputs[i]).data<float>(),
-                                            reinterpret_cast<const float *>(refBuffer), outElementsCount[i],
-                                            outElementsCount[i],
-                                            thr);
+            // TODO now it compares only 1st output
+            // When CVS-126856 is fixed, update to compare all outputs
+            auto output = irs[i].first->get_results().at(0);
+            auto out = irs[i].second.get_tensor(output);
+            auto out_ref = irs_ref[i].get_tensor(output);
+            ov::test::utils::compare(out_ref, out);
         }
 
         if (is_caching_test) {
-            CommonTestUtils::removeFilesWithExt(cacheFolderName, "blob");
-            CommonTestUtils::removeFilesWithExt(cacheFolderName, "cl_cache");
-            CommonTestUtils::removeDir(cacheFolderName);
+            ov::test::utils::removeFilesWithExt(cacheFolderName, "blob");
+            ov::test::utils::removeFilesWithExt(cacheFolderName, "cl_cache");
+            ov::test::utils::removeDir(cacheFolderName);
         }
     }
 
 protected:
     size_t num_streams;
     size_t num_requests;
-    std::vector<std::shared_ptr<ngraph::Function>> fn_ptrs;
+    std::vector<std::shared_ptr<ov::Model>> fn_ptrs;
 };
 
 TEST_P(OVConcurrencyTest, canInferTwoExecNets) {
-    this->execute(false);
+    execute(false);
 }
 
 TEST_P(OVConcurrencyTest, canInferTwoExecNets_cached) {
-    this->execute(true);
+    execute(true);
 }
 
 const std::vector<size_t> num_streams{ 1, 2 };
@@ -157,12 +146,12 @@ INSTANTIATE_TEST_SUITE_P(smoke_RemoteTensor, OVConcurrencyTest,
     OVConcurrencyTest::getTestCaseName);
 
 TEST(canSwapTensorsBetweenInferRequests, inputs) {
-    std::vector<std::vector<uint8_t>> ref;
+    std::vector<ov::Tensor> ref;
     std::vector<ov::Tensor> input_tensors;
-    auto fn = ngraph::builder::subgraph::makeSplitMultiConvConcat();
+    auto fn = ov::test::utils::make_split_multi_conv_concat();
 
-    auto ie = ov::Core();
-    auto compiled_model = ie.compile_model(fn, CommonTestUtils::DEVICE_GPU, ov::hint::inference_precision(ov::element::f32));
+    auto core = ov::test::utils::PluginCache::get().core();
+    auto compiled_model = core->compile_model(fn, ov::test::utils::DEVICE_GPU, ov::hint::inference_precision(ov::element::f32));
 
     const int infer_requests_num = 2;
     ov::InferRequest infer_request1 = compiled_model.create_infer_request();
@@ -172,24 +161,20 @@ TEST(canSwapTensorsBetweenInferRequests, inputs) {
     input_tensors.push_back(infer_request2.get_input_tensor());
 
     auto calc_ref_results = [&](const ov::Tensor& tensor){
-        const auto tensor_size = tensor.get_byte_size();
-        const auto in_blob_buf = static_cast<uint8_t*>(tensor.data());
-        std::vector<uint8_t> inData(in_blob_buf, in_blob_buf + tensor_size);
-        auto ref_out_data = ngraph::helpers::interpreterFunction(fn, {inData}).front().second;
-        ref.push_back(ref_out_data);
-    };
+        auto compiled_model_ref = core->compile_model(fn, ov::test::utils::DEVICE_TEMPLATE);
+        auto inf_req_ref = compiled_model_ref.create_infer_request();
 
-    auto compare_results = [&](ov::Tensor& result, const uint8_t* refResult) {
-        auto thr = FuncTestUtils::GetComparisonThreshold(InferenceEngine::Precision::FP32);
-        ASSERT_EQ(ov::shape_size(fn->get_output_shape(0)), result.get_size());
-        FuncTestUtils::compareRawBuffers(result.data<float>(),
-                                        reinterpret_cast<const float *>(refResult), ov::shape_size(fn->get_output_shape(0)),
-                                        ov::shape_size(fn->get_output_shape(0)),
-                                        thr);
+        auto input = fn->input(0);
+        inf_req_ref.set_tensor(input, tensor);
+        inf_req_ref.infer();
+
+        auto output = fn->get_result();
+        auto out_ref = inf_req_ref.get_tensor(output);
+        ref.push_back(out_ref);
     };
 
     for (int32_t i = 0; i < infer_requests_num; i++) {
-        FuncTestUtils::fill_tensor(input_tensors[i], 10, -5, 1, i);
+        ov::test::utils::fill_tensor_random(input_tensors[i], 10, -5, 1, i);
         calc_ref_results(input_tensors[i]);
     }
 
@@ -205,7 +190,7 @@ TEST(canSwapTensorsBetweenInferRequests, inputs) {
         } else {
             iter1++;
             ov::Tensor output_tensor = infer_request1.get_output_tensor();
-            compare_results(output_tensor, ref[iter1 % 2].data());
+            ov::test::utils::compare(ref[iter1 % 2], output_tensor);
             if (iter1 < niter_limit) {
                 infer_request1.set_input_tensor(input_tensors[(iter1 + 1) % 2]);
                 infer_request1.start_async();
@@ -219,7 +204,7 @@ TEST(canSwapTensorsBetweenInferRequests, inputs) {
         } else {
             iter2++;
             ov::Tensor output_tensor = infer_request2.get_output_tensor();
-            compare_results(output_tensor, ref[(iter2 + 1) % 2].data());
+            ov::test::utils::compare(ref[(iter2 + 1) % 2], output_tensor);
             if (iter2 < niter_limit) {
                 infer_request2.set_input_tensor(input_tensors[iter2 % 2]);
                 infer_request2.start_async();
@@ -237,18 +222,18 @@ TEST(canSwapTensorsBetweenInferRequests, inputs) {
 }
 
 TEST(smoke_InferRequestDeviceMemoryAllocation, usmHostIsNotChanged) {
-    auto fn = ngraph::builder::subgraph::makeDetectionOutput(ngraph::element::Type_t::f32);
+    auto fn = ov::test::utils::make_detection_output(ov::element::f32);
 
-    auto ie = ov::Core();
-    auto compiled_model = ie.compile_model(fn, CommonTestUtils::DEVICE_GPU, ov::hint::inference_precision(ov::element::f32));
+    auto core = ov::test::utils::PluginCache::get().core();
+    auto compiled_model = core->compile_model(fn, ov::test::utils::DEVICE_GPU, ov::hint::inference_precision(ov::element::f32));
 
     ov::InferRequest infer_request1 = compiled_model.create_infer_request();
     ov::InferRequest infer_request2 = compiled_model.create_infer_request();
 
     auto input_tensor1 = infer_request1.get_input_tensor();
-    FuncTestUtils::fill_tensor(input_tensor1, 20, 0, 1, 0);
+    ov::test::utils::fill_tensor_random(input_tensor1, 20, 0, 1, 0);
 
-    auto output_tensor1 = FuncTestUtils::create_and_fill_tensor(compiled_model.output().get_element_type(), compiled_model.output().get_shape());
+    auto output_tensor1 = ov::test::utils::create_and_fill_tensor(compiled_model.output().get_element_type(), compiled_model.output().get_shape());
     auto output_tensor2 = infer_request2.get_output_tensor();
 
     // Use tensor from infer request #2 as an output for infer request #1
@@ -256,7 +241,7 @@ TEST(smoke_InferRequestDeviceMemoryAllocation, usmHostIsNotChanged) {
     ASSERT_NO_THROW(infer_request1.infer());
 
     // Modify tensor somehow and save as a reference values
-    FuncTestUtils::fill_tensor(output_tensor2);
+    ov::test::utils::fill_tensor_random(output_tensor2);
 
     std::vector<float> ref_values;
     ref_values.resize(output_tensor2.get_byte_size());
@@ -276,36 +261,36 @@ TEST(smoke_InferRequestDeviceMemoryAllocation, usmHostIsNotChanged) {
 }
 
 TEST(smoke_InferRequestDeviceMemoryAllocation, canSetSystemHostTensor) {
-    auto fn = ngraph::builder::subgraph::makeDetectionOutput(ngraph::element::Type_t::f32);
+    auto fn = ov::test::utils::make_detection_output(ov::element::f32);
 
-    auto ie = ov::Core();
-    auto compiled_model = ie.compile_model(fn, CommonTestUtils::DEVICE_GPU, ov::hint::inference_precision(ov::element::f32));
+    auto core = ov::test::utils::PluginCache::get().core();
+    auto compiled_model = core->compile_model(fn, ov::test::utils::DEVICE_GPU, ov::hint::inference_precision(ov::element::f32));
 
     ov::InferRequest infer_request1 = compiled_model.create_infer_request();
     ov::InferRequest infer_request2 = compiled_model.create_infer_request();
 
     auto input_tensor1 = infer_request1.get_input_tensor();
-    FuncTestUtils::fill_tensor(input_tensor1, 20, 0, 1, 0);
+    ov::test::utils::fill_tensor_random(input_tensor1, 20, 0, 1, 0);
 
-    auto output_tensor1 = FuncTestUtils::create_and_fill_tensor(compiled_model.output().get_element_type(), compiled_model.output().get_shape());
+    auto output_tensor1 = ov::test::utils::create_and_fill_tensor(compiled_model.output().get_element_type(), compiled_model.output().get_shape());
     auto output_tensor2 = infer_request2.get_output_tensor();
 
     infer_request1.set_output_tensor(output_tensor2);
     ASSERT_NO_THROW(infer_request1.infer());
 
-    FuncTestUtils::fill_tensor(input_tensor1, 10, 0, 1, 1);
+    ov::test::utils::fill_tensor_random(input_tensor1, 10, 0, 1, 1);
     infer_request1.set_output_tensor(output_tensor1);
     ASSERT_NO_THROW(infer_request1.infer());
 }
 
 TEST(canSwapTensorsBetweenInferRequests, outputs) {
-    std::vector<std::vector<uint8_t>> ref;
+    std::vector<ov::Tensor> ref;
     std::vector<ov::Tensor> input_tensors;
     std::vector<ov::Tensor> output_tensors;
-    auto fn = ngraph::builder::subgraph::makeSplitMultiConvConcat();
+    auto fn = ov::test::utils::make_split_multi_conv_concat();
 
-    auto ie = ov::Core();
-    auto compiled_model = ie.compile_model(fn, CommonTestUtils::DEVICE_GPU, ov::hint::inference_precision(ov::element::f32));
+    auto core = ov::test::utils::PluginCache::get().core();
+    auto compiled_model = core->compile_model(fn, ov::test::utils::DEVICE_GPU, ov::hint::inference_precision(ov::element::f32));
 
     const int infer_requests_num = 2;
     ov::InferRequest infer_request1 = compiled_model.create_infer_request();
@@ -317,24 +302,20 @@ TEST(canSwapTensorsBetweenInferRequests, outputs) {
     output_tensors.push_back(infer_request2.get_output_tensor());
 
     auto calc_ref_results = [&](const ov::Tensor& tensor){
-        const auto tensor_size = tensor.get_byte_size();
-        const auto in_blob_buf = static_cast<uint8_t*>(tensor.data());
-        std::vector<uint8_t> inData(in_blob_buf, in_blob_buf + tensor_size);
-        auto ref_out_data = ngraph::helpers::interpreterFunction(fn, {inData}).front().second;
-        ref.push_back(ref_out_data);
-    };
+        auto compiled_model_ref = core->compile_model(fn, ov::test::utils::DEVICE_TEMPLATE);
+        auto inf_req_ref = compiled_model_ref.create_infer_request();
 
-    auto compare_results = [&](ov::Tensor& result, const uint8_t* refResult) {
-        auto thr = FuncTestUtils::GetComparisonThreshold(InferenceEngine::Precision::FP32);
-        ASSERT_EQ(ov::shape_size(fn->get_output_shape(0)), result.get_size());
-        FuncTestUtils::compareRawBuffers(result.data<float>(),
-                                        reinterpret_cast<const float *>(refResult), ov::shape_size(fn->get_output_shape(0)),
-                                        ov::shape_size(fn->get_output_shape(0)),
-                                        thr);
+        auto input = fn->input(0);
+        inf_req_ref.set_tensor(input, tensor);
+        inf_req_ref.infer();
+
+        auto output = fn->get_result();
+        auto out_ref = inf_req_ref.get_tensor(output);
+        ref.push_back(out_ref);
     };
 
     for (int32_t i = 0; i < infer_requests_num; i++) {
-        FuncTestUtils::fill_tensor(input_tensors[i], 10, -5, 1, i);
+        ov::test::utils::fill_tensor_random(input_tensors[i], 10, -5, 1, i);
         calc_ref_results(input_tensors[i]);
     }
 
@@ -350,7 +331,7 @@ TEST(canSwapTensorsBetweenInferRequests, outputs) {
         } else {
             iter1++;
             ov::Tensor output_tensor = infer_request1.get_output_tensor();
-            compare_results(output_tensor, ref[0].data());
+            ov::test::utils::compare(ref[0], output_tensor);
             if (iter1 < niter_limit) {
                 infer_request1.set_output_tensor(output_tensors[(iter1 + 1) % 2]);
                 infer_request1.start_async();
@@ -364,7 +345,7 @@ TEST(canSwapTensorsBetweenInferRequests, outputs) {
         } else {
             iter2++;
             ov::Tensor output_tensor = infer_request2.get_output_tensor();
-            compare_results(output_tensor, ref[1].data());
+            ov::test::utils::compare(ref[1], output_tensor);
             if (iter2 < niter_limit) {
                 infer_request2.set_output_tensor(output_tensors[iter2 % 2]);
                 infer_request2.start_async();
@@ -380,3 +361,4 @@ TEST(canSwapTensorsBetweenInferRequests, outputs) {
         infer_request2.wait();
     }
 }
+} // namespace

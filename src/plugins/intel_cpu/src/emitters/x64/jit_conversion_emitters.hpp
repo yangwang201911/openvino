@@ -14,7 +14,7 @@ namespace intel_cpu {
 class jit_convert_emitter : public jit_emitter {
 public:
     jit_convert_emitter(dnnl::impl::cpu::x64::jit_generator *host, dnnl::impl::cpu::x64::cpu_isa_t host_isa,
-                        const std::shared_ptr<ngraph::Node>& n, InferenceEngine::Precision exec_prc = InferenceEngine::Precision::FP32);
+                        const std::shared_ptr<ov::Node>& n, ov::element::Type exec_prc = ov::element::f32);
 
     size_t get_inputs_num() const override;
 
@@ -32,6 +32,7 @@ protected:
             ov::element::f32,
             ov::element::i32,
             ov::element::bf16,
+            ov::element::f16,
             ov::element::i8,
             ov::element::u8
     };
@@ -46,7 +47,7 @@ protected:
 class jit_convert_truncation_emitter : public jit_convert_emitter {
 public:
     jit_convert_truncation_emitter(dnnl::impl::cpu::x64::jit_generator *host, dnnl::impl::cpu::x64::cpu_isa_t host_isa,
-                                   const std::shared_ptr<ngraph::Node>& n, InferenceEngine::Precision exec_prc = InferenceEngine::Precision::FP32);
+                                   const std::shared_ptr<ov::Node>& n, ov::element::Type exec_prc = ov::element::f32);
 
 private:
     void emit_impl(const std::vector<size_t>& in, const std::vector<size_t>& out) const override;
@@ -67,7 +68,7 @@ private:
 class jit_convert_saturation_emitter : public jit_convert_emitter {
 public:
     jit_convert_saturation_emitter(dnnl::impl::cpu::x64::jit_generator *host, dnnl::impl::cpu::x64::cpu_isa_t host_isa,
-                                   const std::shared_ptr<ngraph::Node>& n, InferenceEngine::Precision exec_prc = InferenceEngine::Precision::FP32);
+                                   const std::shared_ptr<ov::Node>& n, ov::element::Type exec_prc = ov::element::f32);
 
 private:
     void emit_impl(const std::vector<size_t>& in, const std::vector<size_t>& out) const override;

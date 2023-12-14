@@ -29,6 +29,30 @@ protected:
     }
 };
 
+namespace v11 {
+
+class GPUInterpolateLayerTest : public LayerTestsDefinitions::v11::InterpolateLayerTest {
+protected:
+    void SetUp() override {
+        LayerTestsDefinitions::v11::InterpolateLayerTest::SetUp();
+        InterpolateLayerTestParams params = GetParam();
+        InferenceEngine::Precision netPrecision;
+        std::string targetDevice;
+        std::tie(std::ignore, netPrecision, std::ignore, std::ignore, std::ignore, std::ignore, std::ignore,
+                 std::ignore, targetDevice, std::ignore) = params;
+        // Some rounding float to integer types on GPU may differ from CPU, and as result,
+        // the actual values may differ from reference ones on 1 when the float is very close to an integer,
+        // e.g 6,0000023 calculated on CPU may be cast to 5 by OpenCL convert_uchar function.
+        // That is why the threshold is set 1.f for integer types.
+        if (targetDevice == "GPU" &&
+                (netPrecision == InferenceEngine::Precision::U8 || netPrecision == InferenceEngine::Precision::I8)) {
+            threshold = 1.f;
+        }
+    }
+};
+
+} // namespace v11
+
 TEST_P(GPUInterpolateLayerTest, CompareWithRefs) {
     Run();
 }
@@ -63,43 +87,43 @@ const std::vector<std::vector<size_t>> target5dShapes = {
         {1, 1, 4, 4, 4},
 };
 
-const std::vector<ngraph::op::v4::Interpolate::InterpolateMode> modesWithoutNearest = {
-        ngraph::op::v4::Interpolate::InterpolateMode::LINEAR,
-        ngraph::op::v4::Interpolate::InterpolateMode::CUBIC,
-        ngraph::op::v4::Interpolate::InterpolateMode::LINEAR_ONNX,
+const std::vector<ov::op::v4::Interpolate::InterpolateMode> modesWithoutNearest = {
+        ov::op::v4::Interpolate::InterpolateMode::LINEAR,
+        ov::op::v4::Interpolate::InterpolateMode::CUBIC,
+        ov::op::v4::Interpolate::InterpolateMode::LINEAR_ONNX,
 };
 
-const std::vector<ngraph::op::v4::Interpolate::InterpolateMode> nearestMode = {
-        ngraph::op::v4::Interpolate::InterpolateMode::NEAREST,
+const std::vector<ov::op::v4::Interpolate::InterpolateMode> nearestMode = {
+        ov::op::v4::Interpolate::InterpolateMode::NEAREST,
 };
 
-const std::vector<ngraph::op::v4::Interpolate::InterpolateMode> linearOnnxMode = {
-        ngraph::op::v4::Interpolate::InterpolateMode::LINEAR_ONNX,
+const std::vector<ov::op::v4::Interpolate::InterpolateMode> linearOnnxMode = {
+        ov::op::v4::Interpolate::InterpolateMode::LINEAR_ONNX,
 };
 
-const std::vector<ngraph::op::v4::Interpolate::CoordinateTransformMode> coordinateTransformModes = {
-        ngraph::op::v4::Interpolate::CoordinateTransformMode::TF_HALF_PIXEL_FOR_NN,
-        ngraph::op::v4::Interpolate::CoordinateTransformMode::PYTORCH_HALF_PIXEL,
-        ngraph::op::v4::Interpolate::CoordinateTransformMode::HALF_PIXEL,
-        ngraph::op::v4::Interpolate::CoordinateTransformMode::ASYMMETRIC,
-        ngraph::op::v4::Interpolate::CoordinateTransformMode::ALIGN_CORNERS,
+const std::vector<ov::op::v4::Interpolate::CoordinateTransformMode> coordinateTransformModes = {
+        ov::op::v4::Interpolate::CoordinateTransformMode::TF_HALF_PIXEL_FOR_NN,
+        ov::op::v4::Interpolate::CoordinateTransformMode::PYTORCH_HALF_PIXEL,
+        ov::op::v4::Interpolate::CoordinateTransformMode::HALF_PIXEL,
+        ov::op::v4::Interpolate::CoordinateTransformMode::ASYMMETRIC,
+        ov::op::v4::Interpolate::CoordinateTransformMode::ALIGN_CORNERS,
 };
 
-const std::vector<ngraph::op::v4::Interpolate::ShapeCalcMode> shapeCalculationMode = {
-        ngraph::op::v4::Interpolate::ShapeCalcMode::SIZES,
-        ngraph::op::v4::Interpolate::ShapeCalcMode::SCALES,
+const std::vector<ov::op::v4::Interpolate::ShapeCalcMode> shapeCalculationMode = {
+        ov::op::v4::Interpolate::ShapeCalcMode::SIZES,
+        ov::op::v4::Interpolate::ShapeCalcMode::SCALES,
 };
 
-const std::vector<ngraph::op::v4::Interpolate::NearestMode> nearestModes = {
-        ngraph::op::v4::Interpolate::NearestMode::SIMPLE,
-        ngraph::op::v4::Interpolate::NearestMode::ROUND_PREFER_FLOOR,
-        ngraph::op::v4::Interpolate::NearestMode::FLOOR,
-        ngraph::op::v4::Interpolate::NearestMode::CEIL,
-        ngraph::op::v4::Interpolate::NearestMode::ROUND_PREFER_CEIL,
+const std::vector<ov::op::v4::Interpolate::NearestMode> nearestModes = {
+        ov::op::v4::Interpolate::NearestMode::SIMPLE,
+        ov::op::v4::Interpolate::NearestMode::ROUND_PREFER_FLOOR,
+        ov::op::v4::Interpolate::NearestMode::FLOOR,
+        ov::op::v4::Interpolate::NearestMode::CEIL,
+        ov::op::v4::Interpolate::NearestMode::ROUND_PREFER_CEIL,
 };
 
-const std::vector<ngraph::op::v4::Interpolate::NearestMode> defaultNearestMode = {
-        ngraph::op::v4::Interpolate::NearestMode::ROUND_PREFER_FLOOR,
+const std::vector<ov::op::v4::Interpolate::NearestMode> defaultNearestMode = {
+        ov::op::v4::Interpolate::NearestMode::ROUND_PREFER_FLOOR,
 };
 
 const std::vector<std::vector<size_t>> pads = {
@@ -215,7 +239,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_Interpolate_Basic, InterpolateLayerTest, ::testin
         ::testing::Values(InferenceEngine::Layout::ANY),
         ::testing::ValuesIn(inShapes),
         ::testing::ValuesIn(targetShapes),
-        ::testing::Values(CommonTestUtils::DEVICE_GPU),
+        ::testing::Values(ov::test::utils::DEVICE_GPU),
         ::testing::Values(additional_config)),
     InterpolateLayerTest::getTestCaseName);
 
@@ -228,7 +252,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_Interpolate_BasicEmptyAxes, InterpolateLayerTest,
         ::testing::Values(InferenceEngine::Layout::ANY),
         ::testing::ValuesIn(inShapes),
         ::testing::ValuesIn(targetShapes),
-        ::testing::Values(CommonTestUtils::DEVICE_GPU),
+        ::testing::Values(ov::test::utils::DEVICE_GPU),
         ::testing::Values(additional_config)),
     InterpolateLayerTest::getTestCaseName);
 
@@ -241,7 +265,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_Interpolate_Nearest, InterpolateLayerTest, ::test
         ::testing::Values(InferenceEngine::Layout::ANY),
         ::testing::ValuesIn(inShapes),
         ::testing::ValuesIn(targetShapes),
-        ::testing::Values(CommonTestUtils::DEVICE_GPU),
+        ::testing::Values(ov::test::utils::DEVICE_GPU),
         ::testing::Values(additional_config)),
     InterpolateLayerTest::getTestCaseName);
 
@@ -254,7 +278,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_Interpolate_5dLinearOnnx, GPUInterpolateLayerTest
         ::testing::Values(InferenceEngine::Layout::ANY),
         ::testing::ValuesIn(in5dShapes),
         ::testing::ValuesIn(target5dShapes),
-        ::testing::Values(CommonTestUtils::DEVICE_GPU),
+        ::testing::Values(ov::test::utils::DEVICE_GPU),
         ::testing::Values(additional_config)),
     InterpolateLayerTest::getTestCaseName);
 
@@ -267,7 +291,125 @@ INSTANTIATE_TEST_SUITE_P(smoke_Interpolate_5dNearest, GPUInterpolateLayerTest, :
         ::testing::Values(InferenceEngine::Layout::ANY),
         ::testing::ValuesIn(in5dShapes),
         ::testing::ValuesIn(target5dShapes),
-        ::testing::Values(CommonTestUtils::DEVICE_GPU),
+        ::testing::Values(ov::test::utils::DEVICE_GPU),
         ::testing::Values(additional_config)),
     InterpolateLayerTest::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_Interpolate_11_Basic, Interpolate11LayerTest, ::testing::Combine(
+        interpolateCasesWithoutNearest,
+        ::testing::ValuesIn(netPrecisions),
+        ::testing::Values(InferenceEngine::Precision::UNSPECIFIED),
+        ::testing::Values(InferenceEngine::Precision::UNSPECIFIED),
+        ::testing::Values(InferenceEngine::Layout::ANY),
+        ::testing::Values(InferenceEngine::Layout::ANY),
+        ::testing::ValuesIn(inShapes),
+        ::testing::ValuesIn(targetShapes),
+        ::testing::Values(ov::test::utils::DEVICE_GPU),
+        ::testing::Values(additional_config)),
+    Interpolate11LayerTest::getTestCaseName);
+
+const std::vector<ov::op::v4::Interpolate::InterpolateMode> modesPillow = {
+        ov::op::v4::Interpolate::InterpolateMode::BILINEAR_PILLOW,
+        ov::op::v4::Interpolate::InterpolateMode::BICUBIC_PILLOW,
+};
+
+const std::vector<InferenceEngine::Precision> pillowModePrecisions = {
+    InferenceEngine::Precision::FP16,
+    InferenceEngine::Precision::FP32,
+};
+
+INSTANTIATE_TEST_SUITE_P(smoke_Interpolate_11_Pillow, Interpolate11LayerTest, ::testing::Combine(
+    ::testing::Combine(
+            ::testing::ValuesIn(modesPillow),
+            ::testing::Values(ov::op::v4::Interpolate::ShapeCalcMode::SCALES),
+            ::testing::Values(ov::op::v4::Interpolate::CoordinateTransformMode::TF_HALF_PIXEL_FOR_NN),
+            ::testing::Values(ov::op::v4::Interpolate::NearestMode::SIMPLE),
+            ::testing::Values(false),
+            ::testing::Values(std::vector<size_t>{0, 0, 1, 1}),
+            ::testing::Values(std::vector<size_t>{0, 0, 1, 1}),
+            ::testing::ValuesIn(cubeCoefs),
+            ::testing::Values(std::vector<int64_t>{2, 3}),
+            ::testing::Values(std::vector<float>{2.f, 2.f})),
+        ::testing::ValuesIn(pillowModePrecisions),
+        ::testing::Values(InferenceEngine::Precision::UNSPECIFIED),
+        ::testing::Values(InferenceEngine::Precision::UNSPECIFIED),
+        ::testing::Values(InferenceEngine::Layout::ANY),
+        ::testing::Values(InferenceEngine::Layout::ANY),
+        ::testing::Values(std::vector<size_t>{1, 1, 23, 23}),
+        ::testing::Values(std::vector<size_t>{1, 1, 50, 50}),
+        ::testing::Values(ov::test::utils::DEVICE_GPU),
+        ::testing::Values(additional_config)),
+    Interpolate11LayerTest::getTestCaseName);
+
+
+INSTANTIATE_TEST_SUITE_P(smoke_Interpolate_11_Pillow_Horizontal, Interpolate11LayerTest, ::testing::Combine(
+    ::testing::Combine(
+            ::testing::ValuesIn(modesPillow),
+            ::testing::Values(ov::op::v4::Interpolate::ShapeCalcMode::SCALES),
+            ::testing::Values(ov::op::v4::Interpolate::CoordinateTransformMode::TF_HALF_PIXEL_FOR_NN),
+            ::testing::Values(ov::op::v4::Interpolate::NearestMode::SIMPLE),
+            ::testing::Values(false),
+            ::testing::Values(std::vector<size_t>{0, 0, 1, 1}),
+            ::testing::Values(std::vector<size_t>{0, 0, 1, 1}),
+            ::testing::ValuesIn(cubeCoefs),
+            ::testing::Values(std::vector<int64_t>{2, 3}),
+            ::testing::Values(std::vector<float>{1.f, 2.f})),
+        ::testing::Values(InferenceEngine::Precision::FP32),
+        ::testing::Values(InferenceEngine::Precision::UNSPECIFIED),
+        ::testing::Values(InferenceEngine::Precision::UNSPECIFIED),
+        ::testing::Values(InferenceEngine::Layout::ANY),
+        ::testing::Values(InferenceEngine::Layout::ANY),
+        ::testing::Values(std::vector<size_t>{1, 1, 23, 23}),
+        ::testing::Values(std::vector<size_t>{1, 1, 25, 50}),
+        ::testing::Values(ov::test::utils::DEVICE_GPU),
+        ::testing::Values(additional_config)),
+    Interpolate11LayerTest::getTestCaseName);
+
+
+INSTANTIATE_TEST_SUITE_P(smoke_Interpolate_11_Pillow_Vertical, Interpolate11LayerTest, ::testing::Combine(
+    ::testing::Combine(
+            ::testing::ValuesIn(modesPillow),
+            ::testing::Values(ov::op::v4::Interpolate::ShapeCalcMode::SCALES),
+            ::testing::Values(ov::op::v4::Interpolate::CoordinateTransformMode::TF_HALF_PIXEL_FOR_NN),
+            ::testing::Values(ov::op::v4::Interpolate::NearestMode::SIMPLE),
+            ::testing::Values(false),
+            ::testing::Values(std::vector<size_t>{0, 0, 1, 1}),
+            ::testing::Values(std::vector<size_t>{0, 0, 1, 1}),
+            ::testing::ValuesIn(cubeCoefs),
+            ::testing::Values(std::vector<int64_t>{2, 3}),
+            ::testing::Values(std::vector<float>{2.f, 1.f})),
+        ::testing::Values(InferenceEngine::Precision::FP32),
+        ::testing::Values(InferenceEngine::Precision::UNSPECIFIED),
+        ::testing::Values(InferenceEngine::Precision::UNSPECIFIED),
+        ::testing::Values(InferenceEngine::Layout::ANY),
+        ::testing::Values(InferenceEngine::Layout::ANY),
+        ::testing::Values(std::vector<size_t>{1, 1, 23, 23}),
+        ::testing::Values(std::vector<size_t>{1, 1, 50, 25}),
+        ::testing::Values(ov::test::utils::DEVICE_GPU),
+        ::testing::Values(additional_config)),
+    Interpolate11LayerTest::getTestCaseName);
+
+
+INSTANTIATE_TEST_SUITE_P(smoke_Interpolate_11_Pillow_Vertical_BF, Interpolate11LayerTest, ::testing::Combine(
+    ::testing::Combine(
+            ::testing::ValuesIn(modesPillow),
+            ::testing::Values(ov::op::v4::Interpolate::ShapeCalcMode::SCALES),
+            ::testing::Values(ov::op::v4::Interpolate::CoordinateTransformMode::TF_HALF_PIXEL_FOR_NN),
+            ::testing::Values(ov::op::v4::Interpolate::NearestMode::SIMPLE),
+            ::testing::Values(false),
+            ::testing::Values(std::vector<size_t>{2, 1, 0, 0}),
+            ::testing::Values(std::vector<size_t>{2, 1, 0, 0}),
+            ::testing::ValuesIn(cubeCoefs),
+            ::testing::Values(std::vector<int64_t>{0, 1}),
+            ::testing::Values(std::vector<float>{2.f, 1.f})),
+        ::testing::Values(InferenceEngine::Precision::FP32),
+        ::testing::Values(InferenceEngine::Precision::UNSPECIFIED),
+        ::testing::Values(InferenceEngine::Precision::UNSPECIFIED),
+        ::testing::Values(InferenceEngine::Layout::ANY),
+        ::testing::Values(InferenceEngine::Layout::ANY),
+        ::testing::Values(std::vector<size_t>{23, 23, 2, 2}),
+        ::testing::Values(std::vector<size_t>{52, 26, 2, 2}),
+        ::testing::Values(ov::test::utils::DEVICE_GPU),
+        ::testing::Values(additional_config)),
+    Interpolate11LayerTest::getTestCaseName);
 } // namespace

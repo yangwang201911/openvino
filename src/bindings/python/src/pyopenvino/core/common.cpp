@@ -8,6 +8,7 @@
 
 #include "Python.h"
 #include "openvino/core/except.hpp"
+#include "openvino/runtime/shared_buffer.hpp"
 #include "openvino/util/common_util.hpp"
 
 #define C_CONTIGUOUS py::detail::npy_api::constants::NPY_ARRAY_C_CONTIGUOUS_
@@ -30,6 +31,7 @@ const std::map<ov::element::Type, py::dtype>& ov_type_to_dtype() {
         {ov::element::boolean, py::dtype("bool")},
         {ov::element::u1, py::dtype("uint8")},
         {ov::element::u4, py::dtype("uint8")},
+        {ov::element::nf4, py::dtype("uint8")},
         {ov::element::i4, py::dtype("int8")},
     };
     return ov_type_to_dtype_mapping;
@@ -131,76 +133,39 @@ py::array as_contiguous(py::array& array, ov::element::Type type) {
     }
 }
 
-py::array array_from_tensor(ov::Tensor&& t) {
-    switch (t.get_element_type()) {
-    case ov::element::Type_t::f32: {
-        return py::array_t<float>(t.get_shape(), t.data<float>());
-        break;
+py::array array_from_tensor(ov::Tensor&& t, bool is_shared) {
+    auto ov_type = t.get_element_type();
+    auto dtype = Common::ov_type_to_dtype().at(ov_type);
+
+    // Return the array as a view:
+    if (is_shared) {
+        if (ov_type.bitwidth() < Common::values::min_bitwidth) {
+            return py::array(dtype, t.get_byte_size(), t.data(), py::cast(t));
+        }
+        return py::array(dtype, t.get_shape(), t.get_strides(), t.data(), py::cast(t));
     }
-    case ov::element::Type_t::f64: {
-        return py::array_t<double>(t.get_shape(), t.data<double>());
-        break;
+    // Return the array as a copy:
+    if (ov_type.bitwidth() < Common::values::min_bitwidth) {
+        return py::array(dtype, t.get_byte_size(), t.data());
     }
-    case ov::element::Type_t::bf16: {
-        return py::array(py::dtype("float16"), t.get_shape(), t.data<ov::bfloat16>());
-        break;
-    }
-    case ov::element::Type_t::f16: {
-        return py::array(py::dtype("float16"), t.get_shape(), t.data<ov::float16>());
-        break;
-    }
-    case ov::element::Type_t::i8: {
-        return py::array_t<int8_t>(t.get_shape(), t.data<int8_t>());
-        break;
-    }
-    case ov::element::Type_t::i16: {
-        return py::array_t<int16_t>(t.get_shape(), t.data<int16_t>());
-        break;
-    }
-    case ov::element::Type_t::i32: {
-        return py::array_t<int32_t>(t.get_shape(), t.data<int32_t>());
-        break;
-    }
-    case ov::element::Type_t::i64: {
-        return py::array_t<int64_t>(t.get_shape(), t.data<int64_t>());
-        break;
-    }
-    case ov::element::Type_t::u8: {
-        return py::array_t<uint8_t>(t.get_shape(), t.data<uint8_t>());
-        break;
-    }
-    case ov::element::Type_t::u16: {
-        return py::array_t<uint16_t>(t.get_shape(), t.data<uint16_t>());
-        break;
-    }
-    case ov::element::Type_t::u32: {
-        return py::array_t<uint32_t>(t.get_shape(), t.data<uint32_t>());
-        break;
-    }
-    case ov::element::Type_t::u64: {
-        return py::array_t<uint64_t>(t.get_shape(), t.data<uint64_t>());
-        break;
-    }
-    case ov::element::Type_t::boolean: {
-        return py::array_t<bool>(t.get_shape(), t.data<bool>());
-        break;
-    }
-    default: {
-        OPENVINO_THROW("Numpy array cannot be created from given OV Tensor!");
-        break;
-    }
-    }
+    return py::array(dtype, t.get_shape(), t.get_strides(), t.data());
 }
 
 };  // namespace array_helpers
 
 template <>
 ov::op::v0::Constant create_copied(py::array& array) {
+    // Do not copy data from the array, only return empty tensor based on type.
+    if (array.size() == 0) {
+        return ov::op::v0::Constant(array_helpers::get_ov_type(array), array_helpers::get_shape(array));
+    }
     // Convert to contiguous array if not already in C-style.
     if (!array_helpers::is_contiguous(array)) {
         array = array_helpers::as_contiguous(array, array_helpers::get_ov_type(array));
     }
     // Create actual Constant and a constructor is copying data.
+    // If ndim is equal to 0, creates scalar Constant.
+    // If size is equal to 0, creates empty Constant.
     return ov::op::v0::Constant(array_helpers::get_ov_type(array),
                                 array_helpers::get_shape(array),
                                 array.ndim() == 0 ? array.data() : array.data(0));
@@ -216,9 +181,11 @@ template <>
 ov::op::v0::Constant create_shared(py::array& array) {
     // Check if passed array has C-style contiguous memory layout.
     // If memory is going to be shared it needs to be contiguous before passing to the constructor.
+    // If ndim is equal to 0, creates scalar Constant.
+    // If size is equal to 0, creates empty Constant.
     if (array_helpers::is_contiguous(array)) {
-        auto memory = std::make_shared<ngraph::runtime::SharedBuffer<py::array>>(
-            static_cast<char*>(array.ndim() == 0 ? array.mutable_data() : array.mutable_data(0)),
+        auto memory = std::make_shared<ov::SharedBuffer<py::array>>(
+            static_cast<char*>((array.ndim() == 0 || array.size() == 0) ? array.mutable_data() : array.mutable_data(0)),
             array.ndim() == 0 ? array.itemsize() : array.nbytes(),
             array);
         return ov::op::v0::Constant(array_helpers::get_ov_type(array), array_helpers::get_shape(array), memory);
@@ -234,12 +201,18 @@ ov::op::v0::Constant create_shared(ov::Tensor& tensor) {
 
 template <>
 ov::Tensor create_copied(py::array& array) {
+    // Create actual Tensor.
+    auto tensor = ov::Tensor(array_helpers::get_ov_type(array), array_helpers::get_shape(array));
+    // If size of an array is equal to 0, the array is empty.
+    // Alternative could be `array.nbytes()`.
+    // Do not copy data from it, only return empty tensor based on type.
+    if (array.size() == 0) {
+        return tensor;
+    }
     // Convert to contiguous array if not already in C-style.
     if (!array_helpers::is_contiguous(array)) {
         array = array_helpers::as_contiguous(array, array_helpers::get_ov_type(array));
     }
-    // Create actual Tensor and copy data.
-    auto tensor = ov::Tensor(array_helpers::get_ov_type(array), array_helpers::get_shape(array));
     // If ndim of py::array is 0, array is a numpy scalar. That results in size to be equal to 0.
     std::memcpy(tensor.data(),
                 array.ndim() == 0 ? array.data() : array.data(0),
@@ -253,9 +226,10 @@ ov::Tensor create_shared(py::array& array) {
     // If memory is going to be shared it needs to be contiguous before passing to the constructor.
     if (array_helpers::is_contiguous(array)) {
         // If ndim of py::array is 0, array is a numpy scalar.
+        // If size of an array is equal to 0, the array is empty.
         return ov::Tensor(array_helpers::get_ov_type(array),
                           array_helpers::get_shape(array),
-                          array.ndim() == 0 ? array.mutable_data() : array.mutable_data(0));
+                          (array.ndim() == 0 || array.size() == 0) ? array.mutable_data() : array.mutable_data(0));
     }
     // If passed array is not C-style, throw an error.
     OPENVINO_THROW("SHARED MEMORY MODE FOR THIS TENSOR IS NOT APPLICABLE! Passed numpy array must be C contiguous.");
@@ -267,6 +241,35 @@ ov::Tensor tensor_from_pointer(py::array& array, const ov::Shape& shape, const o
     if (array_helpers::is_contiguous(array)) {
         return ov::Tensor(element_type, shape, const_cast<void*>(array.data(0)), {});
     }
+    OPENVINO_THROW("SHARED MEMORY MODE FOR THIS TENSOR IS NOT APPLICABLE! Passed numpy array must be C contiguous.");
+}
+
+ov::Tensor tensor_from_pointer(py::array& array, const ov::Output<const ov::Node>& port) {
+    auto array_type = array_helpers::get_ov_type(array);
+    auto array_shape_size = ov::shape_size(array_helpers::get_shape(array));
+    auto port_element_type = port.get_element_type();
+    auto port_shape_size = ov::shape_size(port.get_partial_shape().is_dynamic() ? ov::Shape{0} : port.get_shape());
+
+    if (array_helpers::is_contiguous(array)) {
+        if (array_type != port_element_type) {
+            PyErr_WarnEx(PyExc_RuntimeWarning,
+                         "Type of the array and the port are different. Data is going to be casted.",
+                         1);
+        }
+        if (port.get_partial_shape().is_dynamic()) {
+            return ov::Tensor(port, const_cast<void*>(array.data(0)));
+        }
+        if (port_shape_size > array_shape_size) {
+            OPENVINO_THROW("Shape of the port exceeds shape of the array.");
+        }
+        if (port_shape_size < array_shape_size) {
+            PyErr_WarnEx(PyExc_RuntimeWarning,
+                         "Shape of the port is smaller than shape of the array. Passed data will be cropped.",
+                         1);
+        }
+        return ov::Tensor(port, const_cast<void*>(array.data(0)));
+    }
+
     OPENVINO_THROW("SHARED MEMORY MODE FOR THIS TENSOR IS NOT APPLICABLE! Passed numpy array must be C contiguous.");
 }
 
@@ -342,10 +345,10 @@ uint32_t get_optimal_number_of_requests(const ov::CompiledModel& actual) {
     }
 }
 
-py::dict outputs_to_dict(InferRequestWrapper& request) {
+py::dict outputs_to_dict(InferRequestWrapper& request, bool share_outputs) {
     py::dict res;
     for (const auto& out : request.m_outputs) {
-        res[py::cast(out)] = array_helpers::array_from_tensor(request.m_request.get_tensor(out));
+        res[py::cast(out)] = array_helpers::array_from_tensor(request.m_request.get_tensor(out), share_outputs);
     }
     return res;
 }

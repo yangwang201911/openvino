@@ -14,7 +14,7 @@
 #include "transformations/utils/utils.hpp"
 #include "common/cpu_memcpy.h"
 #include "common/reorder_prim.h"
-#include <utils/shape_inference/shape_inference_internal_dyn.hpp>
+#include <shape_inference/shape_inference_internal_dyn.hpp>
 
 using namespace dnnl;
 using namespace InferenceEngine;
@@ -24,7 +24,7 @@ namespace ov {
 namespace intel_cpu {
 namespace node {
 
-#define THROW_ERROR IE_THROW() << getTypeStr() << " layer with name '" << getName() << "' "
+#define THROW_ERROR(...) OPENVINO_THROW(getTypeStr(), " layer with name '", getName(), "' ", __VA_ARGS__)
 
 static NodeConfig make_plain_config(const std::shared_ptr<ov::Node>& op) {
     NodeConfig config;
@@ -32,7 +32,7 @@ static NodeConfig make_plain_config(const std::shared_ptr<ov::Node>& op) {
     for (size_t i = 0; i < op->get_input_size(); i++) {
         const auto &origShape = op->get_input_partial_shape(i);
         const auto& shape = Shape(origShape.rank().get_length() == 0 ? ov::PartialShape{1} : origShape);
-        const auto prec = InferenceEngine::details::convertPrecision(op->get_input_element_type(i));
+        const auto prec = op->get_input_element_type(i);
 
         PortConfig data_conf {};
         auto descCreator = BlockedDescCreator::getCommonCreators().at(LayoutType::ncsp);
@@ -43,7 +43,7 @@ static NodeConfig make_plain_config(const std::shared_ptr<ov::Node>& op) {
     for (size_t i = 0; i < op->get_output_size(); i++) {
         const auto &origShape = op->get_output_partial_shape(i);
         const auto& shape = Shape(origShape.rank().get_length() == 0 ? ov::PartialShape{1} : origShape);
-        const auto prec = InferenceEngine::details::convertPrecision(op->get_output_element_type(i));
+        const auto prec = op->get_output_element_type(i);
 
         PortConfig data_conf {};
         auto descCreator = BlockedDescCreator::getCommonCreators().at(LayoutType::ncsp);
@@ -89,8 +89,8 @@ public:
         auto axis = slice_rule.axis;
         auto stride = slice_rule.stride;
 
-        auto full_dims = full_blob->GetShape().getStaticDims();
-        auto part_dims = part_blob->GetShape().getStaticDims();
+        auto full_dims = full_blob->getShape().getStaticDims();
+        auto part_dims = part_blob->getShape().getStaticDims();
 
         auto abs_stride = std::abs(stride);
         auto sign_of_stride = stride < 0.0f ? -1 : 1;
@@ -98,14 +98,14 @@ public:
         iter_count = full_dims[axis] / abs_stride;
 
         full_dims[axis] = abs_stride;
-        IE_ASSERT(full_dims == part_dims) << "Shape mismatch for tensor iterator port";
+        OPENVINO_ASSERT(full_dims == part_dims, "Shape mismatch for tensor iterator port");
 
         // make chunk view
-        auto chunk_desc = full_blob->GetDescWithType<DnnlMemoryDesc>()->getDnnlDesc();
+        auto chunk_desc = full_blob->getDescWithType<DnnlMemoryDesc>()->getDnnlDesc();
         chunk_desc.get()->dims[axis] = abs_stride;
         chunk_desc.get()->padded_dims[axis] = abs_stride;  // TODO: asamption that plain tensor
 
-        full_mem = full_blob->GetPrimitive();
+        full_mem = full_blob->getPrimitive();
         const auto full_mem_handler = full_mem.get_data_handle();
         dnnl::memory chunk_mem = {chunk_desc, eng, full_mem_handler};
 
@@ -117,16 +117,16 @@ public:
 
         if (sliced_src) {
             mem_holder_src = chunk_mem;
-            mem_holder_dst = to->GetPrimitive();
+            mem_holder_dst = to->getPrimitive();
         } else {
-            mem_holder_src = from->GetPrimitive();
+            mem_holder_src = from->getPrimitive();
             mem_holder_dst = chunk_mem;
         }
         reorder = getReorderPrim(cache, mem_holder_dst.get_engine(), mem_holder_src.get_desc(), mem_holder_dst.get_desc());
     }
 
     void execute(dnnl::stream strm, int iter) override {
-        IE_ASSERT(iter >= 0 && iter < iter_count);
+        OPENVINO_ASSERT(iter >= 0 && iter < iter_count);
 
         auto &chunk_mem = sliced_src ? mem_holder_src : mem_holder_dst;
         chunk_mem.set_data_handle(static_cast<uint8_t *>(full_mem.get_data_handle()) +
@@ -148,8 +148,8 @@ private:
 class BackEdgePortHelper : public PortMapHelper {
 public:
     BackEdgePortHelper(MultiCachePtr cache, const MemoryPtr &from, const MemoryPtr &to, const dnnl::engine& eng) {
-        mem_holder_src = from->GetPrimitive();
-        mem_holder_dst = to->GetPrimitive();
+        mem_holder_src = from->getPrimitive();
+        mem_holder_dst = to->getPrimitive();
         reorder = getReorderPrim(cache, mem_holder_dst.get_engine(), mem_holder_src.get_desc(), mem_holder_dst.get_desc());
     }
 
@@ -164,16 +164,16 @@ class IterCountPortHelper : public PortMapHelper {
 public:
     IterCountPortHelper(const MemoryPtr &to, const dnnl::engine& eng) {
         // Only scalar I32 tensor is supported
-        IE_ASSERT(to->GetDataType() == memory::data_type::s32);
-        IE_ASSERT(to->GetShape() == Shape(VectorDims{1}));
-        mem_holder_dst = to->GetPrimitive();
+        OPENVINO_ASSERT(to->getDataType() == memory::data_type::s32);
+        OPENVINO_ASSERT(to->getShape() == Shape(VectorDims{1}));
+        mem_holder_dst = to->getPrimitive();
     }
 
     void execute(dnnl::stream strm, int n_iter) override {
         auto mem = mem_holder_dst;
         auto data_ptr = static_cast<uint32_t*>(mem.get_data_handle());
         if (data_ptr == nullptr) {
-            IE_THROW() << "TensorIterator node has not allocated memory for IterCountPortHelper";
+            OPENVINO_THROW("TensorIterator node has not allocated memory for IterCountPortHelper");
         }
         *data_ptr = n_iter;
     }
@@ -182,15 +182,15 @@ public:
 class asBoolCheck : public PortChecker {
 public:
     asBoolCheck(const MemoryPtr &mem) {
-        IE_ASSERT(mem->GetDataType() == memory::data_type::u8);
-        IE_ASSERT(mem->GetShape() == Shape(InferenceEngine::SizeVector{1}));
-        mem_holder = mem->GetPrimitive();
+        OPENVINO_ASSERT(mem->getDataType() == memory::data_type::u8);
+        OPENVINO_ASSERT(mem->getShape() == Shape(VectorDims{1}));
+        mem_holder = mem->getPrimitive();
     }
 
     int getStatus() override {
         auto data_ptr = static_cast<uint8_t*>(mem_holder.get_data_handle());
         if (data_ptr == nullptr) {
-            IE_THROW() << "TensorIterator node has not allocated memory for asBoolCheck";
+            OPENVINO_THROW("TensorIterator node has not allocated memory for asBoolCheck");
         }
         return *data_ptr == static_cast<uint8_t>(0) ? 0 : 1;
     }
@@ -199,15 +199,15 @@ public:
 class asIntCheck : public PortChecker {
 public:
     asIntCheck(const MemoryPtr &mem) {
-        IE_ASSERT(mem->GetDataType() == memory::data_type::s32);
-        IE_ASSERT(mem->GetShape() == Shape(InferenceEngine::SizeVector{1}));
-        mem_holder = mem->GetPrimitive();
+        OPENVINO_ASSERT(mem->getDataType() == memory::data_type::s32);
+        OPENVINO_ASSERT(mem->getShape() == Shape(VectorDims{1}));
+        mem_holder = mem->getPrimitive();
     }
 
     int getStatus() override {
         auto data_ptr = static_cast<uint32_t*>(mem_holder.get_data_handle());
         if (data_ptr == nullptr) {
-            IE_THROW() << "TensorIterator node has not allocated memory for asIntCheck";
+            OPENVINO_THROW("TensorIterator node has not allocated memory for asIntCheck");
         }
         return *data_ptr;
     }
@@ -226,13 +226,15 @@ private:
 
 DynamicBuffer::DynamicBuffer(const MemoryPtr &from_, const std::vector<MemoryPtr> &to_,
                              const PortMap &map_rule_) : from(from_), to(to_), map_rule(map_rule_) {
-    elem_size = DnnlExtensionUtils::sizeOfDataType(from->GetDataType());
+    elem_size = DnnlExtensionUtils::sizeOfDataType(from->getDataType());
 }
 
 void DynamicBuffer::execute(const dnnl::engine& eng, const int iter) {
-    if (from->getStaticDims()[map_rule.axis] != std::abs(map_rule.stride))
-        IE_THROW() << "TensorIterator (Loop) has incorrect output shape[axis] after iteration for concatenation. " << std::abs(map_rule.stride) <<
-        " is expected, but actual: " << from->getStaticDims()[map_rule.axis];
+    if (from->getStaticDims()[map_rule.axis] != static_cast<size_t>(std::abs(map_rule.stride)))
+        OPENVINO_THROW("TensorIterator (Loop) has incorrect output shape[axis] after iteration for concatenation. ",
+                       std::abs(map_rule.stride),
+                       " is expected, but actual: ",
+                       from->getStaticDims()[map_rule.axis]);
 
     if (iter == 0) {
         init(eng);
@@ -256,7 +258,7 @@ void DynamicBuffer::init(const dnnl::engine& eng) {
     const auto abs_stride = std::abs(stride);
 
     // We have no idea of "from" node memory dims until the sub_graph has been executed.
-    const auto& src_mem = from->GetPrimitive();
+    const auto& src_mem = from->getPrimitive();
     const auto& src_desc = src_mem.get_desc();
     const auto& dims = src_desc.get_dims();
     count = std::accumulate(dims.begin(), dims.begin() + map_rule.axis, size_t(1), std::multiplies<size_t>());
@@ -269,7 +271,7 @@ void DynamicBuffer::init(const dnnl::engine& eng) {
     }
 
     // reset chunk_offset_in_byte since the first execution
-    chunk_stride_in_byte = mem_holder_buffer->GetSize() / count;
+    chunk_stride_in_byte = mem_holder_buffer->getSize() / count;
     chunk_offset_in_byte = stride > 0 ? 0 : (chunk_stride_in_byte - chunk_unit_in_byte);
     num_execs = 0;
 }
@@ -297,8 +299,7 @@ MemoryPtr DynamicBuffer::create_buffer(const dnnl::engine& eng) {
     auto _descCreator = BlockedDescCreator::getCommonCreators().at(LayoutType::ncsp);
     auto new_buffer_desc = _descCreator->createSharedDesc(from->getDesc().getPrecision(), _shape);
 
-    auto _ptr = std::make_shared<Memory>(eng);
-    _ptr->Create(*new_buffer_desc);
+    auto _ptr = std::make_shared<Memory>(eng, new_buffer_desc);
     return _ptr;
 }
 
@@ -313,12 +314,13 @@ void DynamicBuffer::move_buffer(const MemoryPtr& new_buffer) {
     const auto src_offset_in_byte = stride > 0 ? 0 : (src_stride - valid_size);
     chunk_offset_in_byte = stride > 0 ? 0 : (dst_stride - valid_size);  // reset chunk_offset_in_byte
 
-    copy(reinterpret_cast<uint8_t*>(mem_holder_buffer->GetPtr()) + src_offset_in_byte, reinterpret_cast<uint8_t*>(new_buffer->GetPtr()) + chunk_offset_in_byte,
+    copy(reinterpret_cast<uint8_t*>(mem_holder_buffer->getData()) + src_offset_in_byte,
+        reinterpret_cast<uint8_t*>(new_buffer->getData()) + chunk_offset_in_byte,
         src_stride, dst_stride, count, valid_size);
 
     // assign mem_holder_buffer
     mem_holder_buffer = new_buffer;
-    chunk_stride_in_byte = mem_holder_buffer->GetSize() / count;
+    chunk_stride_in_byte = mem_holder_buffer->getSize() / count;
 
     // adjust for next execution
     if (stride > 0) {
@@ -332,7 +334,7 @@ void DynamicBuffer::move_data() {
     const auto src_stride = abs(map_rule.stride) * len;
     const auto dst_stride = chunk_stride_in_byte;
 
-    copy(reinterpret_cast<const uint8_t*>(from->GetPtr()), reinterpret_cast<uint8_t*>(mem_holder_buffer->GetPtr()) + chunk_offset_in_byte,
+    copy(reinterpret_cast<const uint8_t*>(from->getData()), reinterpret_cast<uint8_t*>(mem_holder_buffer->getData()) + chunk_offset_in_byte,
          src_stride, dst_stride, count, chunk_unit_in_byte);
 
     // adjust for next execution
@@ -350,7 +352,7 @@ void DynamicBuffer::transfer(const Node* node) {
         const auto stride = map_rule.stride;
         const auto abs_stride = std::abs(stride);
 
-        const auto& src_mem = from->GetPrimitive();
+        const auto& src_mem = from->getPrimitive();
         const auto& src_desc = src_mem.get_desc();
         auto dims = src_desc.get_dims();
         dims[axis] = abs_stride * num_execs;
@@ -363,10 +365,10 @@ void DynamicBuffer::transfer(const Node* node) {
         const auto dst_stride = to.front()->getStaticDims()[axis] * len;
         const auto valid_size = chunk_unit_in_byte * num_execs;
         const auto src_offset_in_byte = stride > 0 ? 0 : (src_stride - valid_size);
-        copy(reinterpret_cast<uint8_t*>(mem_holder_buffer->GetPtr()) + src_offset_in_byte, reinterpret_cast<uint8_t*>(to.front()->GetPtr()),
+        copy(reinterpret_cast<uint8_t*>(mem_holder_buffer->getData()) + src_offset_in_byte, reinterpret_cast<uint8_t*>(to.front()->getData()),
             src_stride, dst_stride, count, dst_stride);
     } else {
-        VectorDims newDims = to.front()->GetShape().getDims();
+        VectorDims newDims = to.front()->getShape().getDims();
         nullifyUndefinedDims(newDims);
 
         const auto desc = node->getBaseMemDescAtOutputPort(map_rule.from)->cloneWithNewDims(newDims);
@@ -398,14 +400,14 @@ TensorIterator::TensorIterator(const std::shared_ptr<ov::Node>& op, const GraphC
         Node(op, context, InternalDynShapeInferFactory()), ngraphOp(op) {
     std::string errorMessage;
     if (!isSupportedOperation(op, errorMessage)) {
-        IE_THROW(NotImplemented) << errorMessage;
+        OPENVINO_THROW_NOT_IMPLEMENTED(errorMessage);
     }
 }
 
 void TensorIterator::getSupportedDescriptors() {
     auto tiOp = ov::as_type_ptr<const ov::op::util::SubGraphOp>(ngraphOp);
     if (!tiOp) {
-        THROW_ERROR << "cannot be cast to ov::op::util::SubGraphOp";
+        THROW_ERROR("cannot be cast to ov::op::util::SubGraphOp");
     }
     const std::shared_ptr<const ov::Model> body = tiOp->get_function();
     sub_graph.CreateGraph(body, context);
@@ -436,7 +438,7 @@ void TensorIterator::getSupportedDescriptors() {
         std::string type_name = desc->get_type_info().name;
         if (type_name == "ConcatOutputDescription") {
             auto output_desc = ov::as_type_ptr<const ov::op::util::SubGraphOp::ConcatOutputDescription>(desc);
-            IE_ASSERT(output_desc != nullptr);
+            OPENVINO_ASSERT(output_desc != nullptr);
 
             outputPortMap.emplace_back(PortMap {
                     static_cast<int>(output_desc->m_output_index), static_cast<int>(body_output_idx),
@@ -445,12 +447,12 @@ void TensorIterator::getSupportedDescriptors() {
                     static_cast<int>(output_desc->m_part_size)});
         } else if (type_name == "BodyOutputDescription") {
             auto output_desc = ov::as_type_ptr<const ov::op::util::SubGraphOp::BodyOutputDescription>(desc);
-            IE_ASSERT(output_desc != nullptr);
+            OPENVINO_ASSERT(output_desc != nullptr);
 
             outputPortMap.emplace_back(PortMap {
                     static_cast<int>(output_desc->m_output_index), static_cast<int>(body_output_idx), -1, 1, 0, -1, 1});
         } else {
-            IE_THROW() << "Incorrect type of the output description.";
+            OPENVINO_THROW("Incorrect type of the output description.");
         }
     }
 
@@ -476,7 +478,7 @@ void TensorIterator::getSupportedDescriptors() {
             inputPortMap.emplace_back(PortMap {
                     static_cast<int>(inv_desc->m_input_index), static_cast<int>(body_input_index), -1, 1, 0, -1, 1});
         } else {
-            THROW_ERROR << "has incorrect type of the input description.";
+            THROW_ERROR("has incorrect type of the input description.");
         }
     }
 
@@ -494,7 +496,7 @@ void TensorIterator::getSupportedDescriptors() {
     } else if (auto ti = ov::as_type_ptr<const ov::op::v0::TensorIterator>(ngraphOp)) {
         algorithm = Algorithm::TensorIteratorCommon;
     } else {
-        THROW_ERROR << "isn't supported!";
+        THROW_ERROR("isn't supported!");
     }
 }
 
@@ -513,7 +515,7 @@ void TensorIterator::createPrimitive() {
         lastUsedCond = initial_cond_check->getStatus();
     }
 
-    if (isDynamicNode())
+    if (runAsDynamic())
         prepareDynamicBuffers();
 
     Node::createPrimitive();
@@ -521,9 +523,9 @@ void TensorIterator::createPrimitive() {
 
 bool TensorIterator::needPrepareParams() const {
     if (getAlgorithm() == Algorithm::TensorIteratorLoop) {
-        const auto tripCountPtr = reinterpret_cast<const uint32_t*>(getParentEdgesAtPort(loopTripCountIdx).front()->getMemoryPtr()->GetPtr());
-        const auto condPtr = reinterpret_cast<const uint8_t*>(getParentEdgesAtPort(loopExecutionConditionIdx).front()->getMemoryPtr()->GetPtr());
-        if (tripCountPtr[0] != lastUsedTripCount || static_cast<bool>(condPtr[0]) != lastUsedCond)
+        const auto tripCountPtr = reinterpret_cast<const uint32_t*>(getParentEdgesAtPort(loopTripCountIdx).front()->getMemoryPtr()->getData());
+        const auto condPtr = reinterpret_cast<const uint8_t*>(getParentEdgesAtPort(loopExecutionConditionIdx).front()->getMemoryPtr()->getData());
+        if (tripCountPtr[0] != static_cast<size_t>(lastUsedTripCount) || static_cast<bool>(condPtr[0]) != lastUsedCond)
             return true;
     }
 
@@ -556,7 +558,7 @@ void TensorIterator::prepareParams() {
         prepareContinueCond();
         prepareLoopBodyCurrentIteration();
 
-        if (!isDynamicNode()) {
+        if (!runAsDynamic()) {
             prepareOutputPorts();
             prepareBackEdges();
         }
@@ -568,6 +570,12 @@ void TensorIterator::prepareParams() {
 }
 
 void TensorIterator::execute(dnnl::stream strm) {
+    //Special case, the subgraph is dynamic while the node has all static shapes
+    if (runAsDynamic()) {
+        executeDynamicImpl(strm);
+        return;
+    }
+
     sub_graph.ResetInferCount();
 
     bool continue_cond = initial_cond_check->getStatus();
@@ -634,7 +642,7 @@ void TensorIterator::executeDynamicImpl(dnnl::stream strm) {
 void TensorIterator::prepareInputPorts() {
     const auto &eng = getEngine();
     for (auto map_rule : inputPortMap) {
-        auto &from_mem = getParentEdgesAtPort(map_rule.from)[0]->getMemoryPtr();
+        auto from_mem = getParentEdgesAtPort(map_rule.from)[0]->getMemoryPtr();
         auto &to_mem = input_mems[map_rule.to].front();  // first memory is enough to access the shared underlying physical memory
 
         if (map_rule.axis == -1)
@@ -648,7 +656,7 @@ void TensorIterator::prepareInputPorts() {
 void TensorIterator::prepareOutputPorts() {
     const auto &eng = getEngine();
     for (auto map_rule : outputPortMap) {
-        auto &to_mem = getChildEdgesAtPort(map_rule.from)[0]->getMemoryPtr();
+        auto to_mem = getChildEdgesAtPort(map_rule.from)[0]->getMemoryPtr();
         auto &from_mem = output_mem[map_rule.to];
 
         if (map_rule.axis == -1)
@@ -738,7 +746,7 @@ void TensorIterator::reshapeSubgraphInput() {
     for (auto map_rule : inputPortMap) {
         auto new_dims = sliced_input_dims(getParentEdgesAtPort(map_rule.from)[0]->getMemoryPtr(), map_rule.axis, map_rule.stride);
         auto &to_mems = input_mems[map_rule.to];
-        const auto& body_inshape = to_mems.front()->GetShape();
+        const auto& body_inshape = to_mems.front()->getShape();
         if (body_inshape.isDynamic() || body_inshape.getDims() != new_dims) {
             const auto desc = std::make_shared<CpuBlockedMemoryDesc>(to_mems.front()->getDesc().getPrecision(), Shape(new_dims));
             redefineToMemories(to_mems, desc);
@@ -754,7 +762,7 @@ void TensorIterator::reshapeAndFillOutput(dnnl::stream strm) {
             auto &from_mem = output_mem[map_rule.to];
 
             // if Loop or TI isn't executed we should fill dynamic dims by zero
-            auto newShape = from_mem->GetShape();
+            auto newShape = from_mem->getShape();
             auto newDims = newShape.getDims();
             nullifyUndefinedDims(newDims);
 
@@ -778,7 +786,7 @@ bool TensorIterator::checkForInputAndBodyShapesInequality() const {
     for (auto map_rule : inputPortMap) {
         auto original_dims = sliced_input_dims(getParentEdgesAtPort(map_rule.from)[0]->getMemoryPtr(), map_rule.axis, map_rule.stride);
         auto &to_mems = input_mems[map_rule.to];
-        const auto& body_inshape = to_mems.front()->GetShape();
+        const auto& body_inshape = to_mems.front()->getShape();
         if (body_inshape.isDynamic() || body_inshape.getDims() != original_dims) {
             return true;
         }
@@ -795,8 +803,11 @@ int TensorIterator::getNumIteration(const std::vector<PortMap>& inputPortMap, co
     const auto getNumIterations = [this](const PortMap& rule, const std::vector<size_t>& dimensions) -> int {
         const auto axis = rule.axis;
         if (axis < 0 || static_cast<std::size_t>(axis) >= dimensions.size()) {
-            THROW_ERROR << ": Invalid \"axis\" value in an iteration component: "
-                        << rule.axis  << ", dimensions number = " << dimensions.size() << " (out of range)";
+            THROW_ERROR(": Invalid \"axis\" value in an iteration component: ",
+                        rule.axis,
+                        ", dimensions number = ",
+                        dimensions.size(),
+                        " (out of range)");
         }
         const auto space = dimensions[axis];
         const int start = static_cast<int>((rule.start < 0 ? (space + 1) : 0) + rule.start);
@@ -804,7 +815,7 @@ int TensorIterator::getNumIteration(const std::vector<PortMap>& inputPortMap, co
 
         const auto stride = rule.stride;
         if (stride == 0) {
-            THROW_ERROR << ": Invalid \"stride\" value in an iteration component: " << rule.stride << " (infinite loop)";
+            THROW_ERROR(": Invalid \"stride\" value in an iteration component: ", rule.stride, " (infinite loop)");
         }
         const auto step = std::abs(stride);
 
@@ -812,12 +823,21 @@ int TensorIterator::getNumIteration(const std::vector<PortMap>& inputPortMap, co
         const auto dst = stride < 0 ? start : end;
         const auto length = dst - src;
         if (src < 0 || src >= dst || dst > static_cast<int64_t>(space) || length < step) {
-            THROW_ERROR << ": Invalid \"start\",\"stride\",\"end\" values in an iteration component"
-                        << ": \"start\" = " << rule.start << ", \"stride\" = " << rule.stride  << ", \"end\" = " << rule.end;
+            THROW_ERROR(": Invalid \"start\",\"stride\",\"end\" values in an iteration component",
+                        ": \"start\" = ",
+                        rule.start,
+                        ", \"stride\" = ",
+                        rule.stride,
+                        ", \"end\" = ",
+                        rule.end);
         }
 
         if (length % step != 0) {
-            THROW_ERROR << ": Each iteration must be the same size: length (" << length << ") is not divisible by step (" << step << ")";
+            THROW_ERROR(": Each iteration must be the same size: length (",
+                        length,
+                        ") is not divisible by step (",
+                        step,
+                        ")");
         }
 
         return static_cast<int>(length / step);
@@ -833,8 +853,11 @@ int TensorIterator::getNumIteration(const std::vector<PortMap>& inputPortMap, co
         }
 
         if (rule.from < 0 || rule.from >= static_cast<int64_t>(inputShapes.size())) {
-            THROW_ERROR << ": Invalid \"from\" value: \"from\" = " << rule.from
-                        << " inputs number = " << inputShapes.size() << " (out of range)";
+            THROW_ERROR(": Invalid \"from\" value: \"from\" = ",
+                        rule.from,
+                        " inputs number = ",
+                        inputShapes.size(),
+                        " (out of range)");
         }
 
         const auto currentNumIterations = getNumIterations(rule, dims);
@@ -842,7 +865,10 @@ int TensorIterator::getNumIteration(const std::vector<PortMap>& inputPortMap, co
             isDefault = false;
             numIterations = currentNumIterations;
         } else if (numIterations != currentNumIterations) {
-            THROW_ERROR << ": There are at least two different iterations numbers: " << numIterations << " and " << currentNumIterations;
+            THROW_ERROR(": There are at least two different iterations numbers: ",
+                        numIterations,
+                        " and ",
+                        currentNumIterations);
         }
     }
 
@@ -856,8 +882,11 @@ int TensorIterator::getNumIteration(const std::vector<PortMap>& inputPortMap, co
             continue;
 
         if (rule.from < 0 || rule.from >= static_cast<int64_t>(outputShapes.size())) {
-            THROW_ERROR << ": Invalid \"from\" value: \"from\" = " << rule.from
-                        << " inputs number = " << outputShapes.size() << " (out of range)";
+            THROW_ERROR(": Invalid \"from\" value: \"from\" = ",
+                        rule.from,
+                        " inputs number = ",
+                        outputShapes.size(),
+                        " (out of range)");
         }
 
         const auto currentNumIterations = getNumIterations(rule, dims);
@@ -865,11 +894,18 @@ int TensorIterator::getNumIteration(const std::vector<PortMap>& inputPortMap, co
             isDefault = false;
             numIterations = currentNumIterations;
         } else if (numIterations != currentNumIterations) {
-            THROW_ERROR << ": There are at least two different iterations numbers: " << numIterations << " and " << currentNumIterations;
+            THROW_ERROR(": There are at least two different iterations numbers: ",
+                        numIterations,
+                        " and ",
+                        currentNumIterations);
         }
     }
 
     return numIterations;
+}
+
+bool TensorIterator::runAsDynamic() const {
+    return isDynamicNode() || Graph::Status::ReadyDynamic == sub_graph.getStatus();
 }
 
 bool TensorIterator::created() const {

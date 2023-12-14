@@ -25,7 +25,7 @@ protected:
         activationType = activationDecl.first;
         const auto& constantsValue = activationDecl.second;
         const auto ngPrc = FuncTestUtils::PrecisionUtils::convertIE2nGraphPrc(netPrecision);
-        auto params = ngraph::builder::makeParams(ngPrc, {inputDims});
+        ov::ParameterVector params{std::make_shared<ov::op::v0::Parameter>(ngPrc, ov::Shape(inputDims))};
         params[0]->set_friendly_name("Input");
 
         // TODO: remove after integer inference output support
@@ -33,15 +33,14 @@ protected:
             threshold = 1.0;
         }
 
-        const auto inputReshapePattern = std::make_shared<ngraph::opset1::Constant>(ngraph::element::i64,
-                                                                                    ngraph::Shape{inputShape.size()},
-                                                                                    inputShape);
-        const auto inputReshape = std::make_shared<ngraph::opset1::Reshape>(params[0], inputReshapePattern, false);
+        const auto inputReshapePattern =
+            std::make_shared<ov::op::v0::Constant>(ngraph::element::i64, ngraph::Shape{inputShape.size()}, inputShape);
+        const auto inputReshape = std::make_shared<ov::opset1::Reshape>(params[0], inputReshapePattern, false);
         const auto activation =
             ngraph::builder::makeActivation(inputReshape, ngPrc, activationType, shapes.second, constantsValue);
         const auto outputReshapePattern =
-            std::make_shared<ngraph::opset1::Constant>(ngraph::element::i64, ngraph::Shape{2}, inputDims);
-        const auto outputReshape = std::make_shared<ngraph::opset1::Reshape>(activation, outputReshapePattern, false);
+            std::make_shared<ov::op::v0::Constant>(ngraph::element::i64, ngraph::Shape{2}, inputDims);
+        const auto outputReshape = std::make_shared<ov::opset1::Reshape>(activation, outputReshapePattern, false);
 
         function = std::make_shared<ngraph::Function>(ngraph::NodeVector{outputReshape}, params);
     }
@@ -132,23 +131,23 @@ std::map<std::vector<size_t>, std::vector<std::vector<size_t>>> basic = {{{1, 50
                                                                          {{1, 936, 513}, {{}}},
                                                                          {{2, 32, 8}, {{}}}};
 
-const auto basicCases = ::testing::Combine(::testing::ValuesIn(CommonTestUtils::combineParams(activationTypes)),
+const auto basicCases = ::testing::Combine(::testing::ValuesIn(ov::test::utils::combineParams(activationTypes)),
                                            ::testing::ValuesIn(netPrecisions),
                                            ::testing::Values(InferenceEngine::Precision::UNSPECIFIED),
                                            ::testing::Values(InferenceEngine::Precision::UNSPECIFIED),
                                            ::testing::Values(InferenceEngine::Layout::ANY),
                                            ::testing::Values(InferenceEngine::Layout::ANY),
-                                           ::testing::ValuesIn(CommonTestUtils::combineParams(basic)),
-                                           ::testing::Values(CommonTestUtils::DEVICE_GNA));
+                                           ::testing::ValuesIn(ov::test::utils::combineParams(basic)),
+                                           ::testing::Values(ov::test::utils::DEVICE_GNA));
 
-const auto preluCases = ::testing::Combine(::testing::ValuesIn(CommonTestUtils::combineParams(preluActivationTypes)),
+const auto preluCases = ::testing::Combine(::testing::ValuesIn(ov::test::utils::combineParams(preluActivationTypes)),
                                            ::testing::ValuesIn(preluNetPrecisions),
                                            ::testing::Values(InferenceEngine::Precision::UNSPECIFIED),
                                            ::testing::Values(InferenceEngine::Precision::UNSPECIFIED),
                                            ::testing::Values(InferenceEngine::Layout::ANY),
                                            ::testing::Values(InferenceEngine::Layout::ANY),
-                                           ::testing::ValuesIn(CommonTestUtils::combineParams(basic)),
-                                           ::testing::Values(CommonTestUtils::DEVICE_GNA));
+                                           ::testing::ValuesIn(ov::test::utils::combineParams(basic)),
+                                           ::testing::Values(ov::test::utils::DEVICE_GNA));
 
 INSTANTIATE_TEST_SUITE_P(smoke_Activation_Basic,
                          ActivationLayerGNATest,

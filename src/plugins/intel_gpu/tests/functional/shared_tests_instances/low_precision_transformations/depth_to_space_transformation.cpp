@@ -9,7 +9,6 @@
 
 using namespace LayerTestsDefinitions;
 using namespace InferenceEngine::details;
-using namespace ngraph::opset1;
 
 namespace {
 const std::vector<ngraph::element::Type> precisions = {
@@ -17,9 +16,9 @@ const std::vector<ngraph::element::Type> precisions = {
     ngraph::element::f16
 };
 
-const std::vector<DepthToSpace::DepthToSpaceMode> modes = {
-        DepthToSpace::DepthToSpaceMode::BLOCKS_FIRST,
-        DepthToSpace::DepthToSpaceMode::DEPTH_FIRST
+const std::vector<ov::op::v0::DepthToSpace::DepthToSpaceMode> modes = {
+        ov::op::v0::DepthToSpace::DepthToSpaceMode::BLOCKS_FIRST,
+        ov::op::v0::DepthToSpace::DepthToSpaceMode::DEPTH_FIRST
 };
 
 const std::vector<ngraph::PartialShape> inputShapesBS2 = {
@@ -29,7 +28,7 @@ const std::vector<ngraph::PartialShape> inputShapesBS2 = {
 const auto DepthToSpaceBS2 = ::testing::Combine(
     ::testing::ValuesIn(precisions),
     ::testing::ValuesIn(inputShapesBS2),
-    ::testing::Values(CommonTestUtils::DEVICE_GPU),
+    ::testing::Values(ov::test::utils::DEVICE_GPU),
     ::testing::ValuesIn(modes),
     ::testing::Values(2)
 );
@@ -43,7 +42,7 @@ const std::vector<ngraph::PartialShape> inputShapesBS3 = {
 const auto DepthToSpaceBS3 = ::testing::Combine(
     ::testing::ValuesIn(precisions),
     ::testing::ValuesIn(inputShapesBS3),
-    ::testing::Values(CommonTestUtils::DEVICE_GPU),
+    ::testing::Values(ov::test::utils::DEVICE_GPU),
     ::testing::ValuesIn(modes),
     ::testing::Values(3)
 );

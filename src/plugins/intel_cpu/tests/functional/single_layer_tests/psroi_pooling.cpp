@@ -4,8 +4,8 @@
 
 #include "test_utils/cpu_test_utils.hpp"
 
-#include "ngraph_functions/builders.hpp"
-#include "ngraph_functions/utils/ngraph_helpers.hpp"
+#include "ov_models/builders.hpp"
+#include "ov_models/utils/ov_helpers.hpp"
 
 using namespace InferenceEngine;
 using namespace CPUTestUtils;
@@ -87,15 +87,15 @@ protected:
         ngraph::Shape proposalShape = { proposal.size() / 5, 5 };
 
         auto coords = ngraph::builder::makeConstant<float>(ngraph::element::f32, proposalShape, proposal);
-        auto params = ngraph::builder::makeParams(ngraph::element::f32, {featureMapShape});
+        ov::ParameterVector params {std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ov::Shape(featureMapShape))};
 
-        auto psroi = std::make_shared<ngraph::op::v0::PSROIPooling>(params[0], coords, outputDim, groupSize,
+        auto psroi = std::make_shared<ov::op::v0::PSROIPooling>(params[0], coords, outputDim, groupSize,
                                                        spatialScale, spatialBinsX, spatialBinsY, mode);
         psroi->get_rt_info() = getCPUInfo();
         selectedType = getPrimitiveType() + "_" + inPrc.name();
 
         threshold = 1e-2f;
-        const ngraph::ResultVector results{std::make_shared<ngraph::opset3::Result>(psroi)};
+        const ngraph::ResultVector results{std::make_shared<ov::op::v0::Result>(psroi)};
         function = std::make_shared<ngraph::Function>(results, params, "PSROIPooling");
     }
 };
@@ -167,7 +167,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingAverageLayoutTest, PSROIPoolingLayerC
                                 ::testing::Combine(
                                         psroiPoolingAverageParams,
                                         ::testing::ValuesIn(netPrecisions),
-                                        ::testing::Values(CommonTestUtils::DEVICE_CPU)),
+                                        ::testing::Values(ov::test::utils::DEVICE_CPU)),
                                 ::testing::ValuesIn(filterCPUSpecificParams(resCPUParams))),
                         PSROIPoolingLayerCPUTest::getTestCaseName);
 
@@ -176,7 +176,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingBilinearLayoutTest, PSROIPoolingLayer
                                 ::testing::Combine(
                                         psroiPoolingBilinearParams,
                                         ::testing::ValuesIn(netPrecisions),
-                                        ::testing::Values(CommonTestUtils::DEVICE_CPU)),
+                                        ::testing::Values(ov::test::utils::DEVICE_CPU)),
                                 ::testing::ValuesIn(filterCPUSpecificParams(resCPUParams))),
                         PSROIPoolingLayerCPUTest::getTestCaseName);
 } // namespace

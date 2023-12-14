@@ -28,19 +28,19 @@ void ExecGraphInputsFusingBinConv::SetUp() {
     const size_t numOutChannels = 16, numGroups = 16;
     const std::vector<size_t > strides = {1, 1}, dilations = {1, 1};
     const std::vector<ptrdiff_t> padsBegin = {1, 1}, padsEnd = {0, 0};
-    const ngraph::op::PadType paddingType = ngraph::op::PadType::EXPLICIT;
+    const ov::op::PadType paddingType = ov::op::PadType::EXPLICIT;
     const float padValue = 1.0;
     targetDevice = this->GetParam();
 
-    auto params = ngraph::builder::makeParams(ngraph::element::f32, {inputShapes});
+    ov::ParameterVector params {std::make_shared<ov::op::v0::Parameter>(ngraph::element::f32, ov::Shape(inputShapes))};
     auto binConv = ngraph::builder::makeBinaryConvolution(params[0], binConvKernelSize, strides, padsBegin, padsEnd, dilations, paddingType, numOutChannels,
                                                           padValue);
     auto conv = ngraph::builder::makeGroupConvolution(binConv, ngraph::element::f32, convKernelSize, strides, padsBegin, padsEnd, dilations, paddingType,
                                                       numOutChannels, numGroups);
 
-    auto biasNode = std::make_shared<ngraph::op::Constant>(ngraph::element::f32, std::vector<size_t>{16, 1, 1});
-    auto add = std::make_shared<ngraph::opset1::Add>(conv, biasNode);
-    ngraph::ResultVector results{std::make_shared<ngraph::opset1::Result>(add)};
+    auto biasNode = std::make_shared<ov::op::v0::Constant>(ngraph::element::f32, std::vector<size_t>{16, 1, 1});
+    auto add = std::make_shared<ov::op::v1::Add>(conv, biasNode);
+    ngraph::ResultVector results{std::make_shared<ov::op::v0::Result>(add)};
     fnPtr = std::make_shared<ngraph::Function>(results, params, "BinConvFuseConv");
 }
 

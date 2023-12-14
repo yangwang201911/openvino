@@ -11,9 +11,9 @@
 #include "common_test_utils/common_utils.hpp"
 #include "functional_test_utils/blob_utils.hpp"
 #include "functional_test_utils/plugin_cache.hpp"
-#include "ngraph_functions/builders.hpp"
-#include "ngraph_functions/pass/convert_prc.hpp"
-#include "ngraph_functions/utils/ngraph_helpers.hpp"
+#include "ov_models/builders.hpp"
+#include "ov_models/pass/convert_prc.hpp"
+#include "ov_models/utils/ov_helpers.hpp"
 #include "shared_test_classes/base/layer_test_utils.hpp"
 
 typedef std::tuple<InferenceEngine::Precision,          // Network Precision
@@ -53,22 +53,22 @@ protected:
 
         outPrc = InferenceEngine::Precision::FP32;
 
-        auto params = ngraph::builder::makeParams(ngPrc, {{1, 72}});
+        ov::ParameterVector params{std::make_shared<ov::op::v0::Parameter>(ngPrc, ov::Shape{1, 72})};
 
         std::vector<size_t> outFormShapes1 = {1, 1, 6, 12};
         auto pattern1 =
-            std::make_shared<ngraph::opset1::Constant>(ngraph::element::Type_t::i64, ngraph::Shape{4}, outFormShapes1);
-        auto reshape1 = std::make_shared<ngraph::opset1::Reshape>(params[0], pattern1, false);
+            std::make_shared<ov::op::v0::Constant>(ngraph::element::Type_t::i64, ngraph::Shape{4}, outFormShapes1);
+        auto reshape1 = std::make_shared<ov::opset1::Reshape>(params[0], pattern1, false);
 
         auto constant1 = ngraph::builder::makeConstant<float>(ngPrc, {1, 1, 1, 12}, {}, true);
         auto eltwise = ngraph::builder::makeEltwise(reshape1, constant1, eltwiseType);
 
         std::vector<size_t> outFormShapes2 = {1, 72};
         auto pattern2 =
-            std::make_shared<ngraph::opset1::Constant>(ngraph::element::Type_t::i64, ngraph::Shape{2}, outFormShapes2);
-        auto reshape2 = std::make_shared<ngraph::opset1::Reshape>(eltwise, pattern2, false);
+            std::make_shared<ov::op::v0::Constant>(ngraph::element::Type_t::i64, ngraph::Shape{2}, outFormShapes2);
+        auto reshape2 = std::make_shared<ov::opset1::Reshape>(eltwise, pattern2, false);
 
-        ngraph::ResultVector results{std::make_shared<ngraph::opset1::Result>(reshape2)};
+        ngraph::ResultVector results{std::make_shared<ov::op::v0::Result>(reshape2)};
         function = std::make_shared<ngraph::Function>(results, params, "Eltwise4dBroadcast");
     }
 };
@@ -102,23 +102,23 @@ protected:
 
         outPrc = InferenceEngine::Precision::FP32;
 
-        auto params = ngraph::builder::makeParams(ngPrc, {{1, 72}, {1, 72}});
-
+        ov::ParameterVector params{std::make_shared<ov::op::v0::Parameter>(ngPrc, ov::Shape{1, 72}),
+                                   std::make_shared<ov::op::v0::Parameter>(ngPrc, ov::Shape{1, 72})};
         std::vector<size_t> outFormShapes1 = {1, 1, 6, 12};
         auto pattern1 =
-            std::make_shared<ngraph::opset1::Constant>(ngraph::element::Type_t::i64, ngraph::Shape{4}, outFormShapes1);
-        auto reshape1 = std::make_shared<ngraph::opset1::Reshape>(params[0], pattern1, false);
+            std::make_shared<ov::op::v0::Constant>(ngraph::element::Type_t::i64, ngraph::Shape{4}, outFormShapes1);
+        auto reshape1 = std::make_shared<ov::opset1::Reshape>(params[0], pattern1, false);
 
-        auto reshape2 = std::make_shared<ngraph::opset1::Reshape>(params[1], pattern1, false);
+        auto reshape2 = std::make_shared<ov::opset1::Reshape>(params[1], pattern1, false);
 
         auto eltwise = ngraph::builder::makeEltwise(reshape1, reshape2, eltwiseType);
 
         std::vector<size_t> outFormShapes2 = {1, 72};
         auto pattern2 =
-            std::make_shared<ngraph::opset1::Constant>(ngraph::element::Type_t::i64, ngraph::Shape{2}, outFormShapes2);
-        auto reshape3 = std::make_shared<ngraph::opset1::Reshape>(eltwise, pattern2, false);
+            std::make_shared<ov::op::v0::Constant>(ngraph::element::Type_t::i64, ngraph::Shape{2}, outFormShapes2);
+        auto reshape3 = std::make_shared<ov::opset1::Reshape>(eltwise, pattern2, false);
 
-        ngraph::ResultVector results{std::make_shared<ngraph::opset1::Result>(reshape3)};
+        ngraph::ResultVector results{std::make_shared<ov::op::v0::Result>(reshape3)};
         function = std::make_shared<ngraph::Function>(results, params, "Eltwise4dMultipleInput");
     }
 };
@@ -147,7 +147,7 @@ const std::vector<ngraph::helpers::EltwiseTypes> eltwiseOpTypes = {ngraph::helpe
 INSTANTIATE_TEST_SUITE_P(smoke_Eltwise4d,
                          Eltwise4dBroadcast,
                          ::testing::Combine(::testing::ValuesIn(netPrecisions),
-                                            ::testing::Values(CommonTestUtils::DEVICE_GNA),
+                                            ::testing::Values(ov::test::utils::DEVICE_GNA),
                                             ::testing::ValuesIn(configs),
                                             ::testing::ValuesIn(eltwiseOpTypes)),
                          Eltwise4dBroadcast::getTestCaseName);
@@ -155,7 +155,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_Eltwise4d,
 INSTANTIATE_TEST_SUITE_P(smoke_Eltwise4d,
                          Eltwise4dMultipleInput,
                          ::testing::Combine(::testing::ValuesIn(netPrecisions),
-                                            ::testing::Values(CommonTestUtils::DEVICE_GNA),
+                                            ::testing::Values(ov::test::utils::DEVICE_GNA),
                                             ::testing::ValuesIn(configsMultiple),
                                             ::testing::ValuesIn(eltwiseOpTypes)),
                          Eltwise4dMultipleInput::getTestCaseName);

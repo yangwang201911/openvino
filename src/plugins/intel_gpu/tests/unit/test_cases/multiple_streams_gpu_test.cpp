@@ -21,9 +21,9 @@ using namespace ::tests;
 
 TEST(multistream_gpu, basic) {
     const int num_streams = 2;
-    auto task_config = InferenceEngine::CPUStreamsExecutor::Config();
+    auto task_config = ov::threading::IStreamsExecutor::Config();
     task_config._streams = num_streams;
-    auto task_executor = std::make_shared<InferenceEngine::CPUStreamsExecutor>(task_config);
+    auto task_executor = std::make_shared<ov::threading::CPUStreamsExecutor>(task_config);
     auto& engine = get_test_engine();
 
     ExecutionConfig config = get_test_default_config(engine);
@@ -39,7 +39,7 @@ TEST(multistream_gpu, basic) {
     topology.add(data("weights", weights));
     topology.add(eltwise("eltwise", input_info("input1"), input_info("input2"), eltwise_mode::sum));
     topology.add(fully_connected("fc", input_info("eltwise"), "weights"));
-    topology.add(shape_of("shape_of", input_info("fc"), 3, data_types::i32));
+    topology.add(shape_of("shape_of", input_info("fc"), data_types::i32));
 
     auto prog_ptr = program::build_program(engine, topology, config);
     auto &node = prog_ptr->get_node("shape_of");
@@ -53,7 +53,7 @@ TEST(multistream_gpu, basic) {
         streams.push_back(networks[i]->get_stream_ptr());
     }
 
-    std::vector<InferenceEngine::Task> tasks;
+    std::vector<ov::threading::Task> tasks;
     for (size_t i = 0; i < num_streams; i++) {
         tasks.push_back([&networks, &streams, i, &engine] {
             auto cfg = get_test_default_config(engine);
@@ -85,7 +85,7 @@ TEST(multistream_gpu, basic) {
         });
     }
 
-    task_executor->runAndWait(tasks);
+    task_executor->run_and_wait(tasks);
     tasks.clear();
     networks.clear();
 }

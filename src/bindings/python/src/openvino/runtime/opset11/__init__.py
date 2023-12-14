@@ -11,7 +11,7 @@ from openvino.runtime.opset8.ops import adaptive_max_pool
 from openvino.runtime.opset1.ops import add
 from openvino.runtime.opset1.ops import asin
 from openvino.runtime.opset4.ops import asinh
-from openvino.runtime.opset3.ops import assign
+from openvino.runtime.opset6.ops import assign
 from openvino.runtime.opset1.ops import atan
 from openvino.runtime.opset4.ops import atanh
 from openvino.runtime.opset1.ops import avg_pool
@@ -122,7 +122,7 @@ from openvino.runtime.opset4.ops import proposal
 from openvino.runtime.opset1.ops import range
 from openvino.runtime.opset8.ops import random_uniform
 from openvino.runtime.opset9.ops import rdft
-from openvino.runtime.opset3.ops import read_value
+from openvino.runtime.opset6.ops import read_value
 from openvino.runtime.opset4.ops import reduce_l1
 from openvino.runtime.opset4.ops import reduce_l2
 from openvino.runtime.opset1.ops import reduce_logical_and
@@ -145,6 +145,7 @@ from openvino.runtime.opset2.ops import roi_pooling
 from openvino.runtime.opset7.ops import roll
 from openvino.runtime.opset5.ops import round
 from openvino.runtime.opset3.ops import scatter_elements_update
+from openvino.runtime.opset4.ops import scatter_nd_update
 from openvino.runtime.opset3.ops import scatter_update
 from openvino.runtime.opset1.ops import select
 from openvino.runtime.opset1.ops import selu

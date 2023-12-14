@@ -6,19 +6,18 @@
 #include "shared_test_classes/single_layer/activation.hpp"
 #include "test_utils/cpu_test_utils.hpp"
 
-using namespace InferenceEngine;
 using namespace CPUTestUtils;
-using namespace ngraph::helpers;
-using namespace ov::test;
+using namespace ov::test::utils;
 
-namespace CPULayerTestsDefinitions  {
+namespace ov {
+namespace test {
 namespace Activation {
 namespace {
 
-const std::vector<Precision>& netPrc() {
-    static const std::vector<Precision> netPrc {
-        Precision::FP32,
-        Precision::BF16,
+const std::vector<ov::element::Type>& netPrc() {
+    static const std::vector<ov::element::Type> netPrc {
+        ov::element::f32,
+        ov::element::bf16,
     };
 
     return netPrc;
@@ -44,10 +43,10 @@ const std::vector<CPUSpecificParams>& cpuParams3Dblocked() {
 const auto blockedCases3D = ::testing::Combine(
     ::testing::ValuesIn(static_shapes_to_test_representation(basic3D())),
     ::testing::Values(activationShapes()),
-    ::testing::ValuesIn(CommonTestUtils::combineParams(activationTypesBlocked())),
+    ::testing::ValuesIn(ov::test::utils::combineParams(activationTypesBlocked())),
     ::testing::ValuesIn(netPrc()),
-    ::testing::Values(Precision::FP32),
-    ::testing::Values(Precision::FP32),
+    ::testing::Values(ov::element::f32),
+    ::testing::Values(ov::element::f32),
     ::testing::ValuesIn(filterCPUSpecificParams(cpuParams3Dblocked()))
 );
 
@@ -65,10 +64,10 @@ const std::vector<CPUSpecificParams>& cpuParams4Dblocked() {
 const auto basicCases4D = ::testing::Combine(
     ::testing::ValuesIn(static_shapes_to_test_representation(basic4D())),
     ::testing::Values(activationShapes()),
-    ::testing::ValuesIn(CommonTestUtils::combineParams(activationTypes())),
+    ::testing::ValuesIn(ov::test::utils::combineParams(activationTypes())),
     ::testing::ValuesIn(netPrc()),
-    ::testing::Values(Precision::FP32),
-    ::testing::Values(Precision::FP32),
+    ::testing::Values(ov::element::f32),
+    ::testing::Values(ov::element::f32),
     ::testing::ValuesIn(filterCPUSpecificParams(cpuParams4Dblocked()))
 );
 
@@ -86,15 +85,16 @@ const std::vector<CPUSpecificParams>& cpuParams5Dblocked() {
 const auto basicCases5D = ::testing::Combine(
     ::testing::ValuesIn(static_shapes_to_test_representation(basic5D())),
     ::testing::Values(activationShapes()),
-    ::testing::ValuesIn(CommonTestUtils::combineParams(activationTypes())),
+    ::testing::ValuesIn(ov::test::utils::combineParams(activationTypes())),
     ::testing::ValuesIn(netPrc()),
-    ::testing::Values(Precision::FP32),
-    ::testing::Values(Precision::FP32),
+    ::testing::Values(ov::element::f32),
+    ::testing::Values(ov::element::f32),
     ::testing::ValuesIn(filterCPUSpecificParams(cpuParams5Dblocked()))
 );
 
 INSTANTIATE_TEST_SUITE_P(smoke_Activation5D_Eltwise_CPU_Blocked, ActivationLayerCPUTest, basicCases5D, ActivationLayerCPUTest::getTestCaseName);
 
-} // namespace
-} // namespace Activation
-} // namespace CPULayerTestsDefinitions
+}  // namespace
+}  // namespace Activation
+}  // namespace test
+}  // namespace ov

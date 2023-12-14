@@ -18,6 +18,13 @@
 #include "snippets/op/subgraph.hpp"
 #include <ie_ngraph_utils.hpp>
 
+namespace dnnl {
+namespace impl {
+std::ostream &operator<<(std::ostream &ss, const primitive_attr_t *attr);
+std::ostream &operator<<(std::ostream &ss, alg_kind_t alg);
+}
+}
+
 namespace ov {
 namespace intel_cpu {
 
@@ -65,7 +72,7 @@ DebugLogEnabled::DebugLogEnabled(const char* file, const char* func, int line, c
 
     bool match = false;
     const char* p0 = p_filters;
-    const char* p1;
+    const char* p1 = p0;
     while (*p0 != 0) {
         p1 = p0;
         while (*p1 != ';' && *p1 != 0)
@@ -103,9 +110,17 @@ void DebugLogEnabled::break_at(const std::string & log) {
 
 std::ostream & operator<<(std::ostream & os, const MemoryDesc& desc) {
     os << desc.getShape().toString()
-       << " " << desc.getPrecision().name()
+       << " " << desc.getPrecision().get_type_name()
        << " " << desc.serializeFormat();
     return os;
+}
+
+std::ostream & operator<<(std::ostream & os, const dnnl::primitive_attr& attr) {
+    return dnnl::impl::operator<<(os, attr.get());
+}
+
+std::ostream & operator<<(std::ostream & os, const dnnl::algorithm& alg) {
+    return dnnl::impl::operator<<(os, convert_to_c(alg));
 }
 
 std::ostream & operator<<(std::ostream & os, const NodeDesc& desc) {
@@ -163,7 +178,7 @@ std::ostream & operator<<(std::ostream & os, const Node &c_node) {
     std::stringstream leftside;
 
     int num_output_port = 0;
-    for (auto wptr : node.getChildEdges()) {
+    for (const auto& wptr : node.getChildEdges()) {
         auto edge = wptr.lock();
         if (num_output_port < edge->getInputNum() + 1)
             num_output_port = edge->getInputNum() + 1;
@@ -181,21 +196,21 @@ std::ostream & operator<<(std::ostream & os, const Node &c_node) {
                     auto desc = &(ptr->getDesc());
                     auto shape_str = desc->getShape().toString();
                     replace_all(shape_str, " ", "");
-                    leftside << comma << desc->getPrecision().name()
+                    leftside << comma << desc->getPrecision().get_type_name()
                                 << "_" << desc->serializeFormat()
                                 << "_" << shape_str
-                                << "_" << ptr->GetData();
+                                << "_" << ptr->getData();
                     b_ouputed = true;
                 } else {
                     leftside << "(empty)";
                 }
             }
-            if (!b_ouputed && nodeDesc && i < nodeDesc->getConfig().outConfs.size()) {
+            if (!b_ouputed && nodeDesc && i < static_cast<int>(nodeDesc->getConfig().outConfs.size())) {
                 auto desc = nodeDesc->getConfig().outConfs[i].getMemDesc();
                 auto shape_str = desc->getShape().toString();
                 replace_all(shape_str, "0 - ?", "?");
                 replace_all(shape_str, " ", "");
-                leftside << comma << desc->getPrecision().name()
+                leftside << comma << desc->getPrecision().get_type_name()
                             << "_" << desc->serializeFormat()
                             << "_" << shape_str;
                 b_ouputed = true;
@@ -214,7 +229,7 @@ std::ostream & operator<<(std::ostream & os, const Node &c_node) {
         if (!inConfs.empty()) {
             os << " in:[";
             for (auto& c : inConfs) {
-                os << c.getMemDesc()->getPrecision().name()
+                os << c.getMemDesc()->getPrecision().get_type_name()
                         << c.getMemDesc()->
                         << "/" << c.getMemDesc()->serializeFormat()
                         << "; ";
@@ -229,7 +244,7 @@ std::ostream & operator<<(std::ostream & os, const Node &c_node) {
             for (auto& c : outConfs) {
                 auto shape_str = c.getMemDesc()->getShape().toString();
                 replace_all(shape_str, "0 - ?", "?");
-                leftside << comma << c.getMemDesc()->getPrecision().name()
+                leftside << comma << c.getMemDesc()->getPrecision().get_type_name()
                             << "_" << c.getMemDesc()->serializeFormat()
                             << "_" << shape_str;
                 comma = ",";
@@ -239,10 +254,10 @@ std::ostream & operator<<(std::ostream & os, const Node &c_node) {
     } else {
         // no SPD yet, use orginal shapes
         comma = "";
-        for (int i = 0; i < num_output_port; i++) {
+        for (size_t i = 0; i < node.getOriginalOutputPrecisions().size(); i++) {
             auto shape = node.getOutputShapeAtPort(i);
             std::string prec_name = "Undef";
-            prec_name = node.getOriginalOutputPrecisionAtPort(i).name();
+            prec_name = node.getOriginalOutputPrecisionAtPort(i).get_type_name();
             auto shape_str = shape.toString();
             replace_all(shape_str, "0 - ?", "?");
             leftside << comma << prec_name
@@ -258,15 +273,19 @@ std::ostream & operator<<(std::ostream & os, const Node &c_node) {
     os << " (";
 
     comma = "";
-    for (int port = 0; port < node.getParentEdges().size(); ++port) {
+    for (size_t port = 0; port < node.getParentEdges().size(); ++port) {
         // find the Parent edge connecting to port
         for (const auto & e : node.getParentEdges()) {
             auto edge = e.lock();
             if (!edge) continue;
-            if (edge->getOutputNum() != port) continue;
+            if (edge->getOutputNum() != static_cast<int>(port)) continue;
             auto n = edge->getParent();
             os << comma;
             os << node_id(*edge->getParent());
+            auto ptr = edge->getMemoryPtr();
+            if (ptr) {
+                os << "_" << ptr->getData();
+            }
             if (!is_single_output_port(*n))
                 os << "[" << edge->getInputNum() << "]";
             comma = ",";
@@ -277,13 +296,13 @@ std::ostream & operator<<(std::ostream & os, const Node &c_node) {
     if (node.getType() == intel_cpu::Type::Input && node.isConstant()) {
         if (auto input_node = reinterpret_cast<intel_cpu::node::Input *>(&node)) {
             auto pmem = input_node->getMemoryPtr();
-            void * data = pmem->GetData();
+            void * data = pmem->getData();
             auto shape = pmem->getDesc().getShape().getDims();
 
             if (shape_size(shape) <= 8) {
-                auto type = InferenceEngine::details::convertPrecision(pmem->getDesc().getPrecision());
+                auto type = pmem->getDesc().getPrecision();
                 auto tensor = std::make_shared<ngraph::runtime::HostTensor>(type, shape, data);
-                auto constop = std::make_shared<ngraph::op::Constant>(tensor);
+                auto constop = std::make_shared<ov::op::v0::Constant>(tensor);
                 comma = "";
                 for (auto & v : constop->get_value_strings()) {
                     os << comma << v;
@@ -349,13 +368,13 @@ std::ostream & operator<<(std::ostream & os, const Node &c_node) {
     return os;
 }
 
-class OstreamAttributeVisitor : public ngraph::AttributeVisitor {
+class OstreamAttributeVisitor : public ov::AttributeVisitor {
     std::ostream & os;
 
 public:
     OstreamAttributeVisitor(std::ostream & os) : os(os) {}
 
-    void on_adapter(const std::string& name, ngraph::ValueAccessor<void>& adapter) override {
+    void on_adapter(const std::string& name, ov::ValueAccessor<void>& adapter) override {
         if (auto a = ov::as_type<ov::AttributeAdapter<std::set<std::string>>>(&adapter)) {
             const auto& value = join(a->get());
             append_attribute(name.c_str(), value.c_str());
@@ -367,43 +386,43 @@ public:
         }
     }
 
-    void on_adapter(const std::string& name, ngraph::ValueAccessor<bool>& adapter) override {
+    void on_adapter(const std::string& name, ov::ValueAccessor<bool>& adapter) override {
         append_attribute(name.c_str(), std::to_string(adapter.get()).c_str());
     }
 
-    void on_adapter(const std::string& name, ngraph::ValueAccessor<std::string>& adapter) override {
+    void on_adapter(const std::string& name, ov::ValueAccessor<std::string>& adapter) override {
         append_attribute(name.c_str(), adapter.get().c_str());
     }
 
-    void on_adapter(const std::string& name, ngraph::ValueAccessor<int64_t>& adapter) override {
+    void on_adapter(const std::string& name, ov::ValueAccessor<int64_t>& adapter) override {
         append_attribute(name.c_str(), std::to_string(adapter.get()).c_str());
     }
 
-    void on_adapter(const std::string& name, ngraph::ValueAccessor<double>& adapter) override {
+    void on_adapter(const std::string& name, ov::ValueAccessor<double>& adapter) override {
         append_attribute(name.c_str(), std::to_string(adapter.get()).c_str());
     }
 
-    void on_adapter(const std::string& name, ngraph::ValueAccessor<std::vector<int>>& adapter) override {
+    void on_adapter(const std::string& name, ov::ValueAccessor<std::vector<int>>& adapter) override {
         const auto& value = join(adapter.get());
         append_attribute(name.c_str(), value.c_str());
     }
 
-    void on_adapter(const std::string& name, ngraph::ValueAccessor<std::vector<int64_t>>& adapter) override {
+    void on_adapter(const std::string& name, ov::ValueAccessor<std::vector<int64_t>>& adapter) override {
         const auto& value = join(adapter.get());
         append_attribute(name.c_str(), value.c_str());
     }
 
-    void on_adapter(const std::string& name, ngraph::ValueAccessor<std::vector<uint64_t>>& adapter) override {
+    void on_adapter(const std::string& name, ov::ValueAccessor<std::vector<uint64_t>>& adapter) override {
         const auto& value = join(adapter.get());
         append_attribute(name.c_str(), value.c_str());
     }
 
-    void on_adapter(const std::string& name, ngraph::ValueAccessor<std::vector<float>>& adapter) override {
+    void on_adapter(const std::string& name, ov::ValueAccessor<std::vector<float>>& adapter) override {
         const auto& value = join(adapter.get());
         append_attribute(name.c_str(), value.c_str());
     }
 
-    void on_adapter(const std::string& name, ngraph::ValueAccessor<std::vector<std::string>>& adapter) override {
+    void on_adapter(const std::string& name, ov::ValueAccessor<std::vector<std::string>>& adapter) override {
         const auto& value = join(adapter.get());
         append_attribute(name.c_str(), value.c_str());
     }
@@ -411,7 +430,7 @@ public:
     void append_attribute(const char * name, const char * value) {
         os << " " << name << "=" << value;
     }
-    void on_adapter(const std::string& name, ngraph::ValueAccessor<std::shared_ptr<ov::Model>>& adapter) override {
+    void on_adapter(const std::string& name, ov::ValueAccessor<std::shared_ptr<ov::Model>>& adapter) override {
         append_attribute(name.c_str(), "Model");
     }
 
@@ -430,23 +449,23 @@ std::ostream & operator<<(std::ostream & os, const PrintableModel& model) {
     OstreamAttributeVisitor osvis(os);
     std::string sep = "";
     os << prefix;
-    for (auto op : f.get_results()) {
+    for (const auto& op : f.get_results()) {
         os << sep << op->get_name();
         sep = ",";
     }
     os << " " << f.get_friendly_name() << "(\n" << prefix;
-    for (auto op : f.get_parameters()) {
+    for (const auto& op : f.get_parameters()) {
         os << "\t" << tag << op->get_friendly_name() << ",\n" << prefix;
     }
     os << ") {\n";
-    for (auto op : f.get_ordered_ops()) {
+    for (const auto& op : f.get_ordered_ops()) {
         auto type = op->get_type_name();
         auto name = op->get_friendly_name();
         os << prefix << "\t";
         if (op->get_output_size() > 1)
             os << "(";
         sep = "";
-        for (int i = 0; i < op->get_output_size(); i++) {
+        for (size_t i = 0; i < op->get_output_size(); i++) {
             os << sep << op->get_output_element_type(i) << "_" << op->get_output_partial_shape(i);
             sep = ",";
         }
@@ -454,7 +473,7 @@ std::ostream & operator<<(std::ostream & os, const PrintableModel& model) {
             os << ")";
         os << "  " << tag << name << " = " << type << "(";
         sep = "";
-        for (int i = 0; i < op->get_input_size(); i++) {
+        for (size_t i = 0; i < op->get_input_size(); i++) {
             auto vout = op->get_input_source_output(i);
             auto iop = vout.get_node_shared_ptr();
             if (iop->get_output_size() > 1) {
@@ -468,16 +487,16 @@ std::ostream & operator<<(std::ostream & os, const PrintableModel& model) {
 
         if (auto constop = std::dynamic_pointer_cast<op::v0::Constant>(op)) {
             if (constop->get_element_type() == element::Type_t::f32) {
-                os << PrintableVector<float>(constop->get_vector<float>());
+                os << printable(constop->get_vector<float>());
             } else if (constop->get_element_type() == element::Type_t::i8) {
-                os << PrintableVector<int8_t>(constop->get_vector<int8_t>());
+                os << printable(constop->get_vector<int8_t>());
             } else if (constop->get_element_type() == element::Type_t::u8) {
-                os << PrintableVector<uint8_t>(constop->get_vector<uint8_t>());
+                os << printable(constop->get_vector<uint8_t>());
             } else {
                 auto sz = shape_size(constop->get_shape());
                 if (sz < 9) {
                     sep = "";
-                    for (auto v : constop->get_value_strings()) {
+                    for (const auto& v : constop->get_value_strings()) {
                         os << sep << v;
                         sep = ",";
                     }
@@ -494,7 +513,7 @@ std::ostream & operator<<(std::ostream & os, const PrintableModel& model) {
         // recursively output subgraphs
         if (auto msubgraph = std::dynamic_pointer_cast<op::util::MultiSubGraphOp>(op)) {
             auto cnt = msubgraph->get_internal_subgraphs_size();
-            for (int i = 0; i < cnt; i++) {
+            for (size_t i = 0; i < cnt; i++) {
                 os << "\t\t MultiSubGraphOp " << tag << msubgraph->get_friendly_name() << "[" << i << "]" << std::endl;
                 os << PrintableModel(*msubgraph->get_function(i).get(), tag, prefix + "\t\t");
             }

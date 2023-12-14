@@ -19,22 +19,21 @@ class Eltwise;
 
 class Convolution : public Node {
 public:
-    Convolution(const std::shared_ptr<ngraph::Node>& op, const GraphContext::CPtr context);
+    Convolution(const std::shared_ptr<ov::Node>& op, const GraphContext::CPtr context);
 
-    static bool isSupportedOperation(const std::shared_ptr<const ngraph::Node>& op, std::string& errorMessage) noexcept;
+    static bool isSupportedOperation(const std::shared_ptr<const ov::Node>& op, std::string& errorMessage) noexcept;
     void getSupportedDescriptors() override;
     void createDescriptor(const std::vector<MemoryDescPtr>& inputDesc,
                           const std::vector<MemoryDescPtr>& outputDesc) override;
     void initDescriptor(const NodeConfig& config) override;
     void selectOptimalPrimitiveDescriptor() override;
     void initSupportedPrimitiveDescriptors() override;
-    void filterSupportedPrimitiveDescriptors() override;
     bool created() const override;
     bool canBeInPlace() const override {
         return false;
     }
-    InferenceEngine::Precision getRuntimePrecision() const override;
-    std::shared_ptr<MemoryDesc> getSrcMemDesc(dnnl::primitive_desc_iterator &primitive_desc_it, size_t idx) override;
+    ov::element::Type getRuntimePrecision() const override;
+    std::shared_ptr<MemoryDesc> getSrcMemDesc(const dnnl::primitive_desc &prim_desc, size_t idx) const override;
 
     dnnl::memory getWeights() const;
     dnnl::memory getBias() const;
@@ -43,7 +42,7 @@ public:
         return getOriginalInputsNumber();
     }
 
-    bool canBeExecutedInInt8() const;
+    bool canBeExecutedInInt8() const override;
     size_t getGroupNum() const { return groupNum; }
     //OV Legacy input zero point mechanism can support per-channel zero point.
     //Hold legacy input zero point.
@@ -56,7 +55,7 @@ public:
     std::vector<int32_t> inputZeroPoints;
     void initializeInputZeroPoints(const uint8_t* inputZpData, const size_t inputZpSize);
 
-    const InferenceEngine::SizeVector &getWeightDims() { return weightDims; }
+    const VectorDims &getWeightDims() { return weightDims; }
     const std::vector<size_t> &getStride() { return stride; }
     const std::vector<ptrdiff_t> &getDilation() { return dilation; }
     const std::vector<ptrdiff_t> &getPaddingL() { return paddingL; }
@@ -67,13 +66,11 @@ public:
         return isGrouped && 1 == groupOC && 1 == groupIC;
     }
 
-    bool isWinograd() const { return isWino; }
-
 protected:
-    InferenceEngine::Precision fusedEltwisePrecision(const NodePtr& fusingNode) const;
+    ov::element::Type fusedEltwisePrecision(const NodePtr& fusingNode) const;
     void redefineOutputMemory(const std::vector<VectorDims> &newOutputShapes) override;
     void addFusedNode(const NodePtr &fusingNode) override;
-    const std::vector<impl_desc_type>& getPrimitivesPriority() override;
+    const std::vector<impl_desc_type>& getDefaultImplPriority() override;
 
 private:
     enum class zpType {
@@ -97,6 +94,19 @@ private:
                                 bool constWeight);
     };
 
+    class ConvolutionSumExecutor : public DnnlExecutor {
+        public:
+            ConvolutionSumExecutor(const dnnl::primitive_desc& pd,
+                    const dnnl::memory::desc& inMemDesc,
+                    const dnnl::memory::desc& weightMemDesc,
+                    const dnnl::memory::desc& outMemDesc,
+                    const dnnl::engine& engine,
+                    bool constWeight);
+
+        private:
+            void reorder_exec(std::unordered_map<int, dnnl::memory> primArgs, dnnl::stream strm) override;
+    };
+
     void prepareParams() override;
     void execute(dnnl::stream strm) override;
     void executeDynamicImpl(dnnl::stream strm) override;
@@ -105,12 +115,10 @@ private:
     void setPostOps(dnnl::primitive_attr &attr, const VectorDims &dims, bool useLegacyPostOps, bool initWeights = false);
     void SetPostOpsAndZeroPoints(std::vector<dnnl::primitive_attr> &attrs);
     void filterSupportedDescriptors();
-    bool isPossibleToSkipInitConfig(const dnnl::primitive_desc &desc) const;
     bool isNspcAvailable() const;
-    InferenceEngine::Blob::Ptr createInternalBlob(InferenceEngine::SizeVector dims, size_t edgeNum, bool isGrouped = false);
 
     void updatePadding();
-    MemoryDescPtr getSumMemDesc(dnnl::primitive_desc_iterator &primitive_desc_it);
+    MemoryDescPtr getSumMemDesc(const dnnl::primitive_desc &primitive_desc_it);
     MemoryPtr getOutputMemory() const;
     VectorDims makeInputDummyShape(const Shape& inpShape) const;
     VectorDims outputStaticShape() const;
@@ -121,20 +129,19 @@ private:
     bool withSum;
     bool withDWConv;
     bool isGrouped;
-    bool isPrimitivesPriorityDefined = false;
     bool withSumBroadcast = false;
     bool preferLegacyPostOps = false;
     bool preferLegacyZeroPoint = false;
     zpType inputZeroPointType = zpType::None;
     // maps each supportedPrimitiveDescriptor to corresponding desc from descs
     std::vector<size_t> descIdx;
+    VectorDims expectedBiasDims {};
 
     std::vector<size_t> stride;
     std::vector<ptrdiff_t> dilation;
     std::vector<ptrdiff_t> paddingL;
     std::vector<ptrdiff_t> paddingR;
-    InferenceEngine::SizeVector weightDims;
-    InferenceEngine::SizeVector biasesDims;
+    VectorDims weightDims;
     std::unordered_map<int, MemoryPtr> convPostOpsArgs[2];
 
     size_t dw_conv_oc;
@@ -149,13 +156,12 @@ private:
     size_t groupIC;
     size_t groupOC;
 
-    InferenceEngine::Precision eltwisePrecision;
+    ov::element::Type eltwisePrecision;
 
     const size_t X_AXIS = 0;
     const size_t Y_AXIS = 1;
 
-    bool isWino = false;
-    static const bool isBrgConvAvailable;
+    static const bool isBrgConvAvailable();
     std::vector<dnnl::primitive_attr> attrs;
     AttrPtr pAttr;
     bool autoPadding = false;
@@ -167,7 +173,7 @@ private:
     MemoryPtr legacyOutputCompensationMemPtr;
     MemoryPtr stockInputZeroPointsMemPtr;
     dnnl::memory::data_type outputDataType = dnnl::memory::data_type::undef;
-    InferenceEngine::Precision sumPrc = InferenceEngine::Precision::UNSPECIFIED;
+    ov::element::Type sumPrc = ov::element::undefined;
 
     // TODO: migrate on convolution_auto algorithm for x64
 #if defined(OPENVINO_ARCH_X86_64)

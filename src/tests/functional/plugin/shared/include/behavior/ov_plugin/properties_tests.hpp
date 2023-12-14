@@ -80,6 +80,7 @@ public:
 using OVCheckSetSupportedRWMetricsPropsTests = OVPropertiesTestsWithCompileModelProps;
 using OVCheckGetSupportedROMetricsPropsTests = OVPropertiesTestsWithCompileModelProps;
 using OVCheckChangePropComplieModleGetPropTests_DEVICE_ID = OVPropertiesTestsWithCompileModelProps;
+using OVCheckChangePropComplieModleGetPropTests_InferencePrecision = OVPropertiesTestsWithCompileModelProps;
 using OVCheckMetricsPropsTests_ModelDependceProps = OVPropertiesTestsWithCompileModelProps;
 
 class OVClassSetDefaultDeviceIDPropTest : public OVPluginTestBase,
@@ -103,6 +104,7 @@ using OVClassCompileModelDoNotReturnDefaultHintTest = OVClassSetDevicePriorityCo
 using OVClassCompileModelAndCheckSecondaryPropertiesTest = OVClassSetDevicePriorityConfigPropsTest;
 
 using OVGetConfigTest = OVClassBaseTestP;
+using OVSpecificDeviceSetConfigTest = OVClassBaseTestP;
 using OVSpecificDeviceGetConfigTest = OVClassBaseTestP;
 using OVGetAvailableDevicesPropsTest = OVClassBaseTestP;
 using OVGetMetricPropsTest = OVClassBaseTestP;
@@ -121,9 +123,9 @@ public:
         std::tie(pluginName, target_device) = GetParam();
         SKIP_IF_CURRENT_TEST_IS_DISABLED();
         APIBaseTest::SetUp();
-        pluginName += IE_BUILD_POSTFIX;
-        if (pluginName == (std::string("openvino_template_plugin") + IE_BUILD_POSTFIX)) {
-            pluginName = ov::util::make_plugin_library_name(CommonTestUtils::getExecutableDirectory(), pluginName);
+        pluginName += OV_BUILD_POSTFIX;
+        if (pluginName == (std::string("openvino_template_plugin") + OV_BUILD_POSTFIX)) {
+            pluginName = ov::util::make_plugin_library_name(ov::test::utils::getExecutableDirectory(), pluginName);
         }
     }
 };

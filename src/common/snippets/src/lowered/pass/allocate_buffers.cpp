@@ -2,9 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+
 #include "snippets/lowered/pass/allocate_buffers.hpp"
 
-#include "snippets/lowered/linear_ir.hpp"
+#include "snippets/lowered/pass/enumerate_expressions.hpp"
+#include "snippets/lowered/pass/solve_buffer_memory.hpp"
+#include "snippets/lowered/pass/init_buffers_default.hpp"
+#include "snippets/lowered/pass/identify_buffers.hpp"
+#include "snippets/lowered/pass/define_buffer_clusters.hpp"
+#include "snippets/lowered/pass/normalize_buffer_ids.hpp"
+#include "snippets/pass/tokenization.hpp"
 #include "snippets/itt.hpp"
 
 namespace ov {
@@ -12,27 +19,30 @@ namespace snippets {
 namespace lowered {
 namespace pass {
 
-void AllocateBuffers::propagate_offset(const LinearIR& linear_ir, const ExpressionPtr& buffer_expr, const size_t offset) {
+AllocateBuffers::AllocateBuffers(size_t& buffer_scratchpad_size, bool is_optimized)
+    : m_buffer_scratchpad_size(buffer_scratchpad_size), m_is_optimized_mode(is_optimized) {}
+
+void AllocateBuffers::set_buffer_offset(const ExpressionPtr& buffer_expr, const size_t offset) {
     // If Buffer has offset We set this offset in the connected MemoryAccess ops
-    // to correctly read and write data because all Buffers has the common data pointer on buffer scratchpad
+    // to correctly read and write data because all Buffers have the common data pointer on buffer scratchpad
 
     const auto buffer = ov::as_type_ptr<op::Buffer>(buffer_expr->get_node());
+    OPENVINO_ASSERT(buffer, "Failed to set Buffer offset: AllocateBuffers expects Buffer op");
+    buffer->set_offset(static_cast<int64_t>(offset));
 
     // Propagate to up: in Store. Buffer can have only one Store
-    {
-        if (buffer->is_intermediate_memory()) {
-            OPENVINO_ASSERT(buffer_expr->get_input_port_connectors().size() == 1, "Buffer with intermediate memory must have one parent");
-            const auto& parent_output = buffer_expr->get_input_port_connector(0)->get_source();
-            const auto& parent_expr = parent_output.get_expr();
-            const auto port = parent_output.get_index();
-            const auto& parent_node = parent_expr->get_node();
-            auto memory_access = ov::as_type_ptr<ov::snippets::op::MemoryAccess>(parent_node);
-            if (memory_access && memory_access->is_memory_access_output_port(port)) {
-                memory_access->set_output_offset(offset, port);
-            } else {
-                OPENVINO_THROW(
-                        "Buffer::set_offset() was called when Buffer didn't have the corresponding MemoryAccess op for offset propagation");
-            }
+    if (ov::is_type<op::IntermediateMemoryBuffer>(buffer)) {
+        OPENVINO_ASSERT(buffer_expr->get_input_port_connectors().size() == 1, "Buffer with intermediate memory must have one parent");
+        const auto& parent_output = buffer_expr->get_input_port_connector(0)->get_source();
+        const auto& parent_expr = parent_output.get_expr();
+        const auto port = parent_output.get_index();
+        const auto& parent_node = parent_expr->get_node();
+        auto memory_access = ov::as_type_ptr<ov::snippets::op::MemoryAccess>(parent_node);
+        if (memory_access && memory_access->is_memory_access_output_port(port)) {
+            memory_access->set_output_offset(offset, port);
+        } else {
+            OPENVINO_THROW(
+                    "Buffer::set_offset() was called when Buffer didn't have the corresponding MemoryAccess op for offset propagation");
         }
     }
     // Propagate to down: in Load. Buffer can have several Load
@@ -54,52 +64,23 @@ void AllocateBuffers::propagate_offset(const LinearIR& linear_ir, const Expressi
     }
 }
 
-
-bool AllocateBuffers::run(LinearIR& linear_ir) {
+bool AllocateBuffers::run(lowered::LinearIR& linear_ir) {
     OV_ITT_SCOPED_TASK(ov::pass::itt::domains::SnippetsTransform, "Snippets::AllocateBuffers");
-
-    bool modified = false;
-    size_t offset = 0;
-    for (auto expr_it = linear_ir.begin(); expr_it != linear_ir.end(); expr_it++) {
-        const auto& expr = *expr_it;
-        if (auto buffer = as_type_ptr<op::Buffer>(expr->get_node())) {
-            const auto buffer_size = buffer->get_byte_size();
-            // If it's the first buffer, offsets are zero => nothing to propagate, can continue
-            if (m_buffer_scratchpad_size == 0) {
-                m_buffer_scratchpad_size += buffer_size;
-                continue;
-            }
-
-            if (buffer->is_intermediate_memory()) {
-                const auto& parent_expr = expr->get_input_port_connector(0)->get_source().get_expr();
-                const auto& parent_node = parent_expr->get_node();
-                // Full MemoryAccess ops need new memory. Previous logic is to check for parent isn't Loop
-                // TODO: It should be unified in MemoryManager with memory reuse in the near future
-                const auto ma = ov::as_type_ptr<op::MemoryAccess>(parent_node);
-                if (ma && ma->is_full_memory_access_op()) {
-                    offset = m_buffer_scratchpad_size;
-                    buffer->set_offset(static_cast<int64_t>(offset));
-                    propagate_offset(linear_ir, *expr_it, offset);
-                    m_buffer_scratchpad_size += buffer_size;
-                    continue;
-                }
-                const auto current_allocated_memory_size = m_buffer_scratchpad_size - offset;
-                if (buffer_size > current_allocated_memory_size) {
-                    m_buffer_scratchpad_size += (buffer_size - current_allocated_memory_size);
-                    // Note: we don't update offset because we just add memory to needed size
-                }
-                propagate_offset(linear_ir, *expr_it, offset);
-            } else {
-                // Single Buffer without input should allocate new memory
-                offset = m_buffer_scratchpad_size;
-                buffer->set_offset(static_cast<int64_t>(offset));
-                propagate_offset(linear_ir, *expr_it, offset);
-                m_buffer_scratchpad_size += buffer_size;
-            }
-            modified = true;
-        }
+    m_buffer_scratchpad_size = 0;
+    PassPipeline pipeline;
+    if (m_is_optimized_mode) {
+        BufferClusters buffer_clusters;
+        pipeline.register_pass<EnumerateExpressions>();
+        pipeline.register_pass<IdentifyBuffers>();
+        pipeline.register_pass<DefineBufferClusters>(buffer_clusters);
+        pipeline.register_pass<SolveBufferMemory>(m_buffer_scratchpad_size, buffer_clusters);
+        pipeline.register_pass<NormalizeBufferIDs>();
+    } else {
+        pipeline.register_pass<InitBuffersDefault>(m_buffer_scratchpad_size);
     }
-    return modified;
+    pipeline.run(linear_ir);
+
+    return m_buffer_scratchpad_size > 0;
 }
 
 } // namespace pass

@@ -5,10 +5,12 @@
 #ifdef CPU_DEBUG_CAPS
 
 #include "ie_common.h"
+#include "openvino/core/except.hpp"
 #include "openvino/util/common_util.hpp"
 
 #include <bitset>
 #include <unordered_map>
+#include <utility>
 
 namespace ov {
 namespace intel_cpu {
@@ -79,13 +81,13 @@ public:
     };
 
     struct PropertyGroup {
-        virtual std::vector<PropertySetterPtr> getPropertySetters(void) = 0;
+        virtual std::vector<PropertySetterPtr> getPropertySetters() = 0;
 
         void parseAndSet(const std::string& str) {
             const auto& options = ov::util::split(str, ' ');
             const auto& propertySetters = getPropertySetters();
             bool failed = false;
-            auto getHelp = [propertySetters] (void) {
+            auto getHelp = [propertySetters]() {
                 std::string help;
                 for (const auto& property : propertySetters)
                     help.append('\t' + property->getPropertyName() + "=<" + property->getPropertyValueDescription() + ">\n");
@@ -109,16 +111,20 @@ public:
             }
 
             if (failed)
-                IE_THROW() << "Wrong syntax: " << str << std::endl
-                           << "The following space separated options are supported (option names are case insensitive):" << std::endl
-                           << getHelp();
+                OPENVINO_THROW(
+                    "Wrong syntax: ",
+                    str,
+                    "\n",
+                    "The following space separated options are supported (option names are case insensitive):",
+                    "\n",
+                    getHelp());
         }
     };
 
     struct : PropertyGroup {
         TransformationFilter transformations;
 
-        std::vector<PropertySetterPtr> getPropertySetters(void) override {
+        std::vector<PropertySetterPtr> getPropertySetters() override {
             return { transformations.getPropertySetter() };
         }
     } disable;
@@ -128,7 +134,7 @@ public:
         IrFormatFilter format = { 1 << IrFormatFilter::Xml };
         TransformationFilter transformations;
 
-        std::vector<PropertySetterPtr> getPropertySetters(void) override {
+        std::vector<PropertySetterPtr> getPropertySetters() override {
             return { PropertySetterPtr(new StringPropertySetter("dir", dir, "path to dumped IRs")),
                      format.getPropertySetter(),
                      transformations.getPropertySetter() };
@@ -138,23 +144,29 @@ public:
 private:
     struct PropertySetter {
         virtual bool parseAndSet(const std::string& str) = 0;
-        virtual std::string getPropertyValueDescription(void) const = 0;
+        virtual std::string getPropertyValueDescription() const = 0;
 
-        PropertySetter(const std::string&& name) : propertyName(name) {}
-        const std::string& getPropertyName(void) const { return propertyName; }
+        PropertySetter(std::string name) : propertyName(std::move(name)) {}
+
+        virtual ~PropertySetter() = default;
+
+        const std::string& getPropertyName() const { return propertyName; }
 
     private:
         const std::string propertyName;
     };
 
     struct StringPropertySetter : PropertySetter {
-        StringPropertySetter(const std::string&& name, std::string& ref, const std::string&& valueDescription)
-            : PropertySetter(std::move(name)), property(ref), propertyValueDescription(valueDescription) {}
+        StringPropertySetter(const std::string& name, std::string& ref, const std::string&& valueDescription)
+            : PropertySetter(name), property(ref), propertyValueDescription(valueDescription) {}
+
+        ~StringPropertySetter() override = default;
+
         bool parseAndSet(const std::string& str) override {
             property = str;
             return true;
         }
-        std::string getPropertyValueDescription(void) const override { return propertyValueDescription; }
+        std::string getPropertyValueDescription() const override { return propertyValueDescription; }
 
     private:
         std::string& property;
@@ -168,8 +180,11 @@ private:
             std::vector<size_t> bits;
         };
 
-        BitsetFilterPropertySetter(const std::string&& name, std::bitset<NumOfBits>& ref, const std::vector<Token>&& tokens)
-            : PropertySetter(std::move(name)), property(ref), propertyTokens(tokens) {}
+        BitsetFilterPropertySetter(const std::string& name, std::bitset<NumOfBits>& ref, const std::vector<Token>&& tokens)
+            : PropertySetter(name), property(ref), propertyTokens(tokens) {}
+
+        ~BitsetFilterPropertySetter() override = default;
+
         bool parseAndSet(const std::string& str) override {
             const auto& tokens = str.empty() ?
                 std::vector<std::string>{"all"} : ov::util::split(ov::util::to_lower(str), ',');
@@ -188,9 +203,9 @@ private:
             }
             return true;
         }
-        std::string getPropertyValueDescription(void) const override {
+        std::string getPropertyValueDescription() const override {
             std::string supportedTokens = "comma separated filter tokens: ";
-            for (auto i = 0; i < propertyTokens.size(); i++) {
+            for (size_t i = 0; i < propertyTokens.size(); i++) {
                 if (i)
                     supportedTokens.push_back(',');
                 supportedTokens.append(propertyTokens[i].name);

@@ -2,18 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#include "common_test_utils/ov_tensor_utils.hpp"
 #include "shared_test_classes/base/ov_subgraph.hpp"
 #include "test_utils/cpu_test_utils.hpp"
 
-#include "ngraph_functions/builders.hpp"
-#include "ngraph_functions/utils/ngraph_helpers.hpp"
-#include <common_test_utils/ov_tensor_utils.hpp>
-
-using namespace InferenceEngine;
 using namespace CPUTestUtils;
-using namespace ov::test;
 
-namespace CPULayerTestsDefinitions {
+namespace ov {
+namespace test {
 
 typedef std::tuple<
         InputShape,     // Input shape definition
@@ -41,10 +37,10 @@ public:
 
         std::ostringstream result;
         result << "IS=";
-        result  << CommonTestUtils::partialShape2str({inputShape.first}) << "_";
+        result  << ov::test::utils::partialShape2str({inputShape.first}) << "_";
         result << "TS=(";
         for (const auto& shape : inputShape.second) {
-            result << CommonTestUtils::vec2str(shape) << "_";
+            result << ov::test::utils::vec2str(shape) << "_";
         }
         result << ")_";
         result << "StartFrom=" << genData.first << "_";
@@ -57,9 +53,12 @@ public:
     void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
         inputs.clear();
         const auto& funcInputs = function->inputs();
-        for (int i = 0; i < funcInputs.size(); ++i) {
+        for (size_t i = 0; i < funcInputs.size(); ++i) {
             const auto& funcInput = funcInputs[i];
-            ov::Tensor tensor = ov::test::utils::create_and_fill_tensor(funcInput.get_element_type(), targetInputStaticShapes[i], range, startFrom);
+            ov::test::utils::InputGenerateData in_data;
+            in_data.start_from = startFrom;
+            in_data.range = range;
+            ov::Tensor tensor = ov::test::utils::create_and_fill_tensor(funcInput.get_element_type(), targetInputStaticShapes[i], in_data);
             inputs.insert({funcInput.get_node_shared_ptr(), tensor});
         }
     }
@@ -69,7 +68,7 @@ protected:
     size_t inferNum = 0;
 
     void SetUp() override {
-        targetDevice = CommonTestUtils::DEVICE_CPU;
+        targetDevice = ov::test::utils::DEVICE_CPU;
         NonZeroLayerTestParams basicParamsSet;
         std::pair<size_t, size_t> genData;
         CPUSpecificParams cpuParams;
@@ -82,9 +81,12 @@ protected:
         std::tie(startFrom, range) = genData;
 
         init_input_shapes({inputShape});
-        auto inputParams = ngraph::builder::makeDynamicParams(netType, inputDynamicShapes);
+        ov::ParameterVector inputParams;
+        for (auto&& shape : inputDynamicShapes) {
+            inputParams.push_back(std::make_shared<ov::op::v0::Parameter>(netType, shape));
+        }
 
-        auto nonZero = std::make_shared<ngraph::opset3::NonZero>(inputParams[0]);
+        auto nonZero = std::make_shared<ov::op::v3::NonZero>(inputParams[0]);
         // I8 was used as a special placeholder during calculating of primitive type if input was U8,
         // real runtime precision is still U8
         selectedType = makeSelectedTypeStr("ref", netType == ElementType::u8 ? ElementType::i8 : netType);
@@ -196,7 +198,7 @@ std::vector<InputShape> inShapesDynamic = {
             }
         }
 };
-std::vector<ngraph::Shape> inShapesStatic = {
+std::vector<ov::Shape> inShapesStatic = {
         { 100 },
         { 4, 100 },
         { 4, 2, 100 },
@@ -224,4 +226,5 @@ INSTANTIATE_TEST_SUITE_P(smoke_NonZeroDynamicCPUTest, NonZeroLayerCPUTest,
 
 } // namespace
 
-} // namespace CPULayerTestsDefinitions
+}  // namespace test
+}  // namespace ov

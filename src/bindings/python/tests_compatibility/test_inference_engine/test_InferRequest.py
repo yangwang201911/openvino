@@ -302,7 +302,8 @@ def test_async_infer_callback_wait_before_start(device):
     request = exec_net.requests[0]
     request.set_completion_callback(callback)
     status = request.wait()
-    assert status == ie.StatusCode.INFER_NOT_STARTED
+    # Plugin API 2.0 has the different behavior will not return this status
+    # assert status == ie.StatusCode.INFER_NOT_STARTED
     request.async_infer({'parameter': img})
     status = request.wait()
     assert status == ie.StatusCode.OK
@@ -320,7 +321,8 @@ def test_async_infer_callback_wait_in_callback(device):
             self.cv = threading.Condition()
             self.request.set_completion_callback(self.callback)
             self.status_code = self.request.wait(ie.WaitMode.STATUS_ONLY)
-            assert self.status_code == ie.StatusCode.INFER_NOT_STARTED
+            # Plugin API 2.0 has the different behavior will not return this status
+            # assert self.status_code == ie.StatusCode.INFER_NOT_STARTED
 
         def callback(self, statusCode, userdata):
             self.status_code = self.request.wait(ie.WaitMode.STATUS_ONLY)
@@ -374,7 +376,7 @@ def test_get_perf_counts(device):
     request = exec_net.requests[0]
     request.infer({'data': img})
     pc = request.get_perf_counts()
-    assert pc['29']["status"] == "EXECUTED"
+    assert pc['29/WithoutBiases']["status"] == "EXECUTED"
     del exec_net
     del ie_core
     del net
@@ -508,7 +510,7 @@ def test_set_blob_with_incorrect_size(device):
     blob = ie.Blob(tensor_desc)
     with pytest.raises(RuntimeError) as e:
         exec_net.requests[0].set_blob("data", blob)
-    assert f"Input blob size is not equal network input size" in str(e.value)
+    assert f"Can't set the input tensor" in str(e.value)
     with pytest.raises(RuntimeError) as e:
         exec_net.requests[0].set_blob("out", blob)
-    assert f"Output blob size is not equal network output size" in str(e.value)
+    assert f"Can't set the output tensor" in str(e.value)

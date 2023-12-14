@@ -13,7 +13,7 @@
 
 #include <gtest/gtest.h>
 
-#include "ngraph_functions/subgraph_builders.hpp"
+#include "ov_models/subgraph_builders.hpp"
 
 #include "common_test_utils/test_common.hpp"
 #include "common_test_utils/test_constants.hpp"
@@ -27,14 +27,19 @@
 #include "functional_test_utils/blob_utils.hpp"
 #include "functional_test_utils/summary/api_summary.hpp"
 #include "openvino/util/file_util.hpp"
+#include "common_test_utils/subgraph_builders/split_conv_concat.hpp"
+#include "common_test_utils/subgraph_builders/kso_func.hpp"
+#include "common_test_utils/subgraph_builders/single_concat_with_constant.hpp"
+#include "common_test_utils/subgraph_builders/concat_with_params.hpp"
+#include "common_test_utils/subgraph_builders/split_concat.hpp"
 
 namespace ov {
 namespace test {
 namespace behavior {
 
-inline std::shared_ptr<ngraph::Function> getDefaultNGraphFunctionForTheDevice(std::vector<size_t> inputShape = {1, 2, 32, 32},
-                                                                              ngraph::element::Type_t ngPrc = ngraph::element::Type_t::f32) {
-    return ngraph::builder::subgraph::makeSplitConcat(inputShape, ngPrc);
+inline std::shared_ptr<ov::Model> getDefaultNGraphFunctionForTheDevice(std::vector<size_t> inputShape = {1, 2, 32, 32},
+                                                                              ov::element::Type_t ngPrc = ov::element::Type_t::f32) {
+    return ov::test::utils::make_split_concat(inputShape, ngPrc);
 }
 
 inline bool sw_plugin_in_target_device(std::string targetDevice) {
@@ -42,11 +47,11 @@ inline bool sw_plugin_in_target_device(std::string targetDevice) {
             targetDevice.find("HETERO") != std::string::npos || targetDevice.find("AUTO") != std::string::npos);
 }
 
-class APIBaseTest : public CommonTestUtils::TestsCommon {
+class APIBaseTest : public ov::test::TestsCommon {
 private:
     // in case of crash jump will be made and work will be continued
-    const std::unique_ptr<CommonTestUtils::CrashHandler> crashHandler = std::unique_ptr<CommonTestUtils::CrashHandler>(
-                                                                        new CommonTestUtils::CrashHandler(CommonTestUtils::CONFORMANCE_TYPE::api));
+    const std::unique_ptr<ov::test::utils::CrashHandler> crashHandler = std::unique_ptr<ov::test::utils::CrashHandler>(
+                                                                        new ov::test::utils::CrashHandler(ov::test::utils::CONFORMANCE_TYPE::api));
 
 protected:
     double k = 1.0;
@@ -119,7 +124,7 @@ public:
         std::ostringstream result;
         result << "targetDevice=" << targetDevice << "_";
         if (!configuration.empty()) {
-            using namespace CommonTestUtils;
+            using namespace ov::test::utils;
             for (auto &configItem : configuration) {
                 result << "configItem=" << configItem.first << "_";
                 configItem.second.print(result);
@@ -161,36 +166,36 @@ inline ov::Core createCoreWithTemplate() {
     ov::Core core;
 #ifndef OPENVINO_STATIC_LIBRARY
     std::string pluginName = "openvino_template_plugin";
-    pluginName += IE_BUILD_POSTFIX;
-    core.register_plugin(ov::util::make_plugin_library_name(CommonTestUtils::getExecutableDirectory(), pluginName),
-        CommonTestUtils::DEVICE_TEMPLATE);
+    pluginName += OV_BUILD_POSTFIX;
+    core.register_plugin(ov::util::make_plugin_library_name(ov::test::utils::getExecutableDirectory(), pluginName),
+        ov::test::utils::DEVICE_TEMPLATE);
 #endif // !OPENVINO_STATIC_LIBRARY
     return core;
 }
 
 class OVClassNetworkTest {
 public:
-    std::shared_ptr<ngraph::Function> actualNetwork, simpleNetwork, multinputNetwork, ksoNetwork;
+    std::shared_ptr<ov::Model> actualNetwork, simpleNetwork, multinputNetwork, ksoNetwork;
 
     void SetUp() {
         SKIP_IF_CURRENT_TEST_IS_DISABLED();
         // Generic network
-        actualNetwork = ngraph::builder::subgraph::makeSplitConcat();
+        actualNetwork = ov::test::utils::make_split_concat();
         // Quite simple network
-        simpleNetwork = ngraph::builder::subgraph::makeSingleConcatWithConstant();
+        simpleNetwork = ov::test::utils::make_single_concat_with_constant();
         // Multinput to substruct network
-        multinputNetwork = ngraph::builder::subgraph::makeConcatWithParams();
+        multinputNetwork = ov::test::utils::make_concat_with_params();
         // Network with KSO
-        ksoNetwork = ngraph::builder::subgraph::makeKSOFunction();
+        ksoNetwork = ov::test::utils::make_kso_function();
     }
 
     virtual void setHeteroNetworkAffinity(const std::string &targetDevice) {
         const std::map<std::string, std::string> deviceMapping = {{"Split_2",       targetDevice},
                                                                   {"Convolution_4", targetDevice},
-                                                                  {"Convolution_7", CommonTestUtils::DEVICE_CPU},
-                                                                  {"Relu_5",        CommonTestUtils::DEVICE_CPU},
+                                                                  {"Convolution_7", ov::test::utils::DEVICE_CPU},
+                                                                  {"Relu_5",        ov::test::utils::DEVICE_CPU},
                                                                   {"Relu_8",        targetDevice},
-                                                                  {"Concat_9",      CommonTestUtils::DEVICE_CPU}};
+                                                                  {"Concat_9",      ov::test::utils::DEVICE_CPU}};
 
         for (const auto &op : actualNetwork->get_ops()) {
             auto it = deviceMapping.find(op->get_friendly_name());
@@ -233,14 +238,14 @@ class OVClassSetDevicePriorityConfigPropsTest : public OVPluginTestBase,
 protected:
     std::string deviceName;
     ov::AnyMap configuration;
-    std::shared_ptr<ngraph::Function> actualNetwork;
+    std::shared_ptr<ov::Model> actualNetwork;
 
 public:
     void SetUp() override {
         std::tie(target_device, configuration) = GetParam();
         SKIP_IF_CURRENT_TEST_IS_DISABLED();
         APIBaseTest::SetUp();
-        actualNetwork = ngraph::builder::subgraph::makeSplitConvConcat();
+        actualNetwork = ov::test::utils::make_split_conv_concat();
     }
 };
 

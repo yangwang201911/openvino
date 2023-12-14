@@ -40,6 +40,8 @@ void regmodule_properties(py::module m) {
     wrap_property_RO(m_properties, ov::optimal_batch_size, "optimal_batch_size");
     wrap_property_RO(m_properties, ov::max_batch_size, "max_batch_size");
     wrap_property_RO(m_properties, ov::range_for_async_infer_requests, "range_for_async_infer_requests");
+    wrap_property_RO(m_properties, ov::execution_devices, "execution_devices");
+    wrap_property_RO(m_properties, ov::loaded_from_cache, "loaded_from_cache");
 
     // Submodule hint
     py::module m_hint =
@@ -103,6 +105,7 @@ void regmodule_properties(py::module m) {
     wrap_property_RO(m_intel_gpu, ov::intel_gpu::memory_statistics, "memory_statistics");
 
     wrap_property_RW(m_intel_gpu, ov::intel_gpu::enable_loop_unrolling, "enable_loop_unrolling");
+    wrap_property_RW(m_intel_gpu, ov::intel_gpu::disable_winograd_convolution, "disable_winograd_convolution");
 
     // Submodule hint (intel_gpu)
     py::module m_intel_gpu_hint = m_intel_gpu.def_submodule(
@@ -167,6 +170,7 @@ void regmodule_properties(py::module m) {
     wrap_property_RO(m_device, ov::device::thermal, "thermal");
     wrap_property_RO(m_device, ov::device::capabilities, "capabilities");
     wrap_property_RO(m_device, ov::device::uuid, "uuid");
+    wrap_property_RO(m_device, ov::device::luid, "luid");
 
     // Special case: ov::device::properties
     m_device.def("properties", []() {
@@ -278,8 +282,14 @@ void regmodule_properties(py::module m) {
     py::module m_intel_auto =
         m_properties.def_submodule("intel_auto",
                                    "openvino.runtime.properties.intel_auto submodule that simulates ov::intel_auto");
+    // Submodule intel_auto - enums
+    py::enum_<ov::intel_auto::SchedulePolicy>(m_intel_auto, "SchedulePolicy", py::arithmetic())
+        .value("ROUND_ROBIN", ov::intel_auto::SchedulePolicy::ROUND_ROBIN)
+        .value("DEVICE_PRIORITY", ov::intel_auto::SchedulePolicy::DEVICE_PRIORITY)
+        .value("DEFAULT", ov::intel_auto::SchedulePolicy::DEFAULT);
 
     wrap_property_RW(m_intel_auto, ov::intel_auto::device_bind_buffer, "device_bind_buffer");
     wrap_property_RW(m_intel_auto, ov::intel_auto::enable_startup_fallback, "enable_startup_fallback");
     wrap_property_RW(m_intel_auto, ov::intel_auto::enable_runtime_fallback, "enable_runtime_fallback");
+    wrap_property_RW(m_intel_auto, ov::intel_auto::schedule_policy, "schedule_policy");
 }

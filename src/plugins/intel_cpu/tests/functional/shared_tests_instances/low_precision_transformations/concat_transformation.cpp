@@ -91,7 +91,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_LPT, ConcatTransformation,
     ::testing::Combine(
         ::testing::ValuesIn(precisions),
         ::testing::ValuesIn(shapes),
-        ::testing::Values(CommonTestUtils::DEVICE_CPU),
+        ::testing::Values(ov::test::utils::DEVICE_CPU),
         ::testing::ValuesIn(testValues)),
     ConcatTransformation::getTestCaseName);
 }  // namespace
@@ -108,7 +108,7 @@ const std::vector<ConcatTransformationTestValues> testValues = {
         {},
         { 256ul, ngraph::Shape({}), {0.f}, {2.55f}, {0.f}, {2.55f} },
         {},
-        std::make_shared<ngraph::opset1::Constant>(ov::element::u8, ov::Shape{1, 3, 16, 16}, std::vector<float>(3 * 16 * 16, 1.0)),
+        std::make_shared<ov::op::v0::Constant>(ov::element::u8, ov::Shape{1, 3, 16, 16}, std::vector<float>(3 * 16 * 16, 1.0)),
         {},
         {
             { ov::element::f16 },
@@ -122,7 +122,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_LPT, ConcatTransformation,
     ::testing::Combine(
         ::testing::ValuesIn(precisions),
         ::testing::Values(ngraph::PartialShape({ 1, 3, 16, 16 })),
-        ::testing::Values(CommonTestUtils::DEVICE_CPU),
+        ::testing::Values(ov::test::utils::DEVICE_CPU),
         ::testing::ValuesIn(testValues)),
     ConcatTransformation::getTestCaseName);
 }  // namespace concat_transformation_mixed

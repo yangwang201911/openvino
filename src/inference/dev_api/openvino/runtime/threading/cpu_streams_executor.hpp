@@ -28,6 +28,11 @@ namespace threading {
 class OPENVINO_RUNTIME_API CPUStreamsExecutor : public IStreamsExecutor {
 public:
     /**
+     * @brief A shared pointer to a CPUStreamsExecutor object
+     */
+    using Ptr = std::shared_ptr<CPUStreamsExecutor>;
+
+    /**
      * @brief Constructor
      * @param config Stream executor parameters
      */
@@ -45,6 +50,8 @@ public:
     int get_stream_id() override;
 
     int get_numa_node_id() override;
+
+    int get_socket_id() override;
 
 private:
     struct Impl;

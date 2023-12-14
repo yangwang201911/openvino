@@ -9,7 +9,7 @@
 #include "gna_executable_network.hpp"
 #include "gna_plugin.hpp"
 #include "memory/gna_memory.hpp"
-#include "ngraph_functions/builders.hpp"
+#include "ov_models/builders.hpp"
 
 using namespace ov::intel_gna;
 using namespace InferenceEngine;
@@ -39,10 +39,10 @@ public:
 
 protected:
     std::shared_ptr<ov::Model> getFunction() {
-        auto firstInput = std::make_shared<ngraph::opset8::Parameter>(net_precision, shape);
-        auto secondInput = std::make_shared<ngraph::opset8::Constant>(net_precision, shape);
-        auto matmul = std::make_shared<ngraph::opset8::MatMul>(firstInput, secondInput, false, true);
-        auto result = std::make_shared<ngraph::opset8::Result>(matmul);
+        auto firstInput = std::make_shared<ov::op::v0::Parameter>(net_precision, shape);
+        auto secondInput = std::make_shared<ov::op::v0::Constant>(net_precision, shape);
+        auto matmul = std::make_shared<ov::op::v0::MatMul>(firstInput, secondInput, false, true);
+        auto result = std::make_shared<ov::op::v0::Result>(matmul);
         auto function =
             std::make_shared<ov::Model>(ov::ResultVector({result}), ov::ParameterVector({firstInput}), "MatMul");
         return function;
@@ -58,7 +58,7 @@ TEST_F(GnaExecutableNetworkMetricsTest, TestNetworkName) {
 TEST_F(GnaExecutableNetworkMetricsTest, TestSupportedProperties) {
     std::string supportedProperties =
         "SUPPORTED_PROPERTIES AVAILABLE_DEVICES OPTIMAL_NUMBER_OF_INFER_REQUESTS RANGE_FOR_ASYNC_INFER_REQUESTS "
-        "OPTIMIZATION_CAPABILITIES FULL_DEVICE_NAME GNA_LIBRARY_FULL_VERSION CACHING_PROPERTIES "
+        "OPTIMIZATION_CAPABILITIES FULL_DEVICE_NAME GNA_LIBRARY_FULL_VERSION "
         "GNA_DEVICE_MODE PERFORMANCE_HINT LOG_LEVEL EXECUTION_DEVICES "
         "GNA_SCALE_FACTOR_PER_INPUT GNA_FIRMWARE_MODEL_IMAGE GNA_HW_EXECUTION_TARGET GNA_HW_COMPILE_TARGET "
         "GNA_PWL_DESIGN_ALGORITHM GNA_PWL_MAX_ERROR_PERCENT INFERENCE_PRECISION_HINT EXECUTION_MODE_HINT "

@@ -11,30 +11,27 @@ using namespace ov::test::behavior;
 namespace {
 
 const std::vector<ov::AnyMap> configs = {
-    {}
+    {{ov::hint::inference_precision.name(), ov::element::f32}}
 };
 
 const std::vector<ov::AnyMap> HeteroConfigs = {
-    {ov::device::priorities(CommonTestUtils::DEVICE_CPU)}
-};
-
-const std::vector<ov::AnyMap> AutoConfigs = {
-    {ov::device::priorities(CommonTestUtils::DEVICE_CPU)}
+    {{ov::hint::inference_precision.name(), ov::element::f32},
+     {ov::device::priorities(ov::test::utils::DEVICE_CPU)}},
 };
 
 std::shared_ptr<ngraph::Function> getFunction1() {
     const std::vector<size_t> inputShape = {1, 4, 20, 20};
     const ngraph::element::Type_t ngPrc = ngraph::element::Type_t::f32;
 
-    auto params = ngraph::builder::makeParams(ngPrc, {inputShape});
+    ov::ParameterVector params{std::make_shared<ov::op::v0::Parameter>(ngPrc, ov::Shape(inputShape))};
     params.front()->set_friendly_name("Param_1");
     params.front()->get_output_tensor(0).set_names({"input_tensor"});
 
     auto in2add = ngraph::builder::makeConstant(ngPrc, {1, 4, 1, 1}, std::vector<float>{}, true);
     auto add = ngraph::builder::makeEltwise(params[0], in2add, ngraph::helpers::EltwiseTypes::ADD);
-    auto relu1 = std::make_shared<ngraph::opset1::Relu>(add->output(0));
+    auto relu1 = std::make_shared<ov::op::v0::Relu>(add->output(0));
     relu1->get_output_tensor(0).set_names({"relu1"});
-    auto relu2 = std::make_shared<ngraph::opset1::Relu>(add->output(0));
+    auto relu2 = std::make_shared<ov::op::v0::Relu>(add->output(0));
     relu2->get_output_tensor(0).set_names({"relu2"});
 
     ngraph::NodeVector results{relu1, relu2};
@@ -45,20 +42,22 @@ std::shared_ptr<ngraph::Function> getFunction2() {
     const std::vector<size_t> inputShape = {1, 4, 20, 20};
     const ngraph::element::Type_t ngPrc = ngraph::element::Type_t::f32;
 
-    auto params = ngraph::builder::makeParams(ngPrc, {inputShape});
+    ov::ParameterVector params{std::make_shared<ov::op::v0::Parameter>(ngPrc, ov::Shape(inputShape))};
     params.front()->set_friendly_name("Param_1");
     params.front()->get_output_tensor(0).set_names({"input_tensor"});
-    auto split = ngraph::builder::makeSplit(params[0], ngPrc, 2, 1);
+    auto split_axis_op = std::make_shared<ov::op::v0::Constant>(ov::element::Type_t::i64, ov::Shape{}, std::vector<int64_t>{1});
+    auto split = std::make_shared<ov::op::v1::Split>(params[0], split_axis_op, 2);
+
 
     auto in2add = ngraph::builder::makeConstant(ngPrc, {1, 2, 1, 1}, std::vector<float>{}, true);
     auto add = ngraph::builder::makeEltwise(split->output(0), in2add, ngraph::helpers::EltwiseTypes::ADD);
-    auto relu1 = std::make_shared<ngraph::opset1::Relu>(add);
+    auto relu1 = std::make_shared<ov::op::v0::Relu>(add);
 
     auto in2mult = ngraph::builder::makeConstant(ngPrc, {1, 2, 1, 1}, std::vector<float>{}, true);
     auto mult = ngraph::builder::makeEltwise(split->output(1), in2mult, ngraph::helpers::EltwiseTypes::MULTIPLY);
-    auto relu2 = std::make_shared<ngraph::opset1::Relu>(mult);
+    auto relu2 = std::make_shared<ov::op::v0::Relu>(mult);
 
-    auto concat = std::make_shared<ngraph::opset1::Concat>(ngraph::OutputVector{relu1->output(0), relu2->output(0)}, 3);
+    auto concat = std::make_shared<ov::op::v0::Concat>(ngraph::OutputVector{relu1->output(0), relu2->output(0)}, 3);
     concat->get_output_tensor(0).set_names({"concat"});
 
     return std::make_shared<ngraph::Function>(concat, params, "SplitAddConcat");
@@ -70,7 +69,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_BehaviorTests_1, OVInferRequestDynamicTests,
                                 ::testing::Values(std::vector<std::pair<std::vector<size_t>, std::vector<size_t>>>{
                                     {{1, 4, 20, 20}, {1, 4, 20, 20}},
                                     {{2, 4, 20, 20}, {2, 4, 20, 20}}}),
-                                ::testing::Values(CommonTestUtils::DEVICE_CPU),
+                                ::testing::Values(ov::test::utils::DEVICE_CPU),
                                 ::testing::ValuesIn(configs)),
                         OVInferRequestDynamicTests::getTestCaseName);
 
@@ -80,7 +79,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_BehaviorTests_2, OVInferRequestDynamicTests,
                                 ::testing::Values(std::vector<std::pair<std::vector<size_t>, std::vector<size_t>>>{
                                     {{1, 4, 20, 20}, {1, 2, 20, 40}},
                                     {{2, 4, 20, 20}, {2, 2, 20, 40}}}),
-                                ::testing::Values(CommonTestUtils::DEVICE_CPU),
+                                ::testing::Values(ov::test::utils::DEVICE_CPU),
                                 ::testing::ValuesIn(configs)),
                         OVInferRequestDynamicTests::getTestCaseName);
 
@@ -90,18 +89,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_Hetero_BehaviorTests, OVInferRequestDynamicTests,
                                 ::testing::Values(std::vector<std::pair<std::vector<size_t>, std::vector<size_t>>>{
                                     {{1, 4, 20, 20}, {1, 2, 20, 40}},
                                     {{2, 4, 20, 20}, {2, 2, 20, 40}}}),
-                                ::testing::Values(CommonTestUtils::DEVICE_HETERO),
+                                ::testing::Values(ov::test::utils::DEVICE_HETERO),
                                 ::testing::ValuesIn(HeteroConfigs)),
                         OVInferRequestDynamicTests::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_Auto_BehaviorTests, OVInferRequestDynamicTests,
-                        ::testing::Combine(
-                                ::testing::Values(getFunction2()),
-                                ::testing::Values(std::vector<std::pair<std::vector<size_t>, std::vector<size_t>>>{
-                                    {{1, 4, 20, 20}, {1, 2, 20, 40}},
-                                    {{2, 4, 20, 20}, {2, 2, 20, 40}}}),
-                                ::testing::Values(CommonTestUtils::DEVICE_AUTO),
-                                ::testing::ValuesIn(AutoConfigs)),
-                        OVInferRequestDynamicTests::getTestCaseName);
-
 }  // namespace

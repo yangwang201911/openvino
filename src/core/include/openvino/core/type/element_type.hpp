@@ -50,7 +50,9 @@ enum class Type_t {
     u8,         //!< u8 element type
     u16,        //!< u16 element type
     u32,        //!< u32 element type
-    u64         //!< u64 element type
+    u64,        //!< u64 element type
+    nf4,        //!< nf4 element type
+    string      //!< string element type
 };
 
 /// \brief Base class to define element type
@@ -114,6 +116,8 @@ public:
     constexpr operator Type_t() const {
         return m_type;
     }
+    // Return element type in string representation
+    std::string to_string() const;
 
 private:
     Type_t m_type{Type_t::undefined};
@@ -175,10 +179,16 @@ constexpr Type u32(Type_t::u32);
 /// \brief u64 element type
 /// \ingroup ov_element_cpp_api
 constexpr Type u64(Type_t::u64);
+/// \brief nf4 element type
+/// \ingroup ov_element_cpp_api
+constexpr Type nf4(Type_t::nf4);
+/// \brief string element type
+/// \ingroup ov_element_cpp_api
+constexpr Type string(Type_t::string);
 
 template <typename T>
 Type from() {
-    throw std::invalid_argument("Unknown type");
+    OPENVINO_THROW("Unknown type");
 }
 template <>
 OPENVINO_API Type from<char>();
@@ -208,6 +218,8 @@ template <>
 OPENVINO_API Type from<ov::bfloat16>();
 template <>
 OPENVINO_API Type from<ov::float16>();
+template <>
+OPENVINO_API Type from<std::string>();
 
 OPENVINO_API Type fundamental_type_for(const Type& type);
 

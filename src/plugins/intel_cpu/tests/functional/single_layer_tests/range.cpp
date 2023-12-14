@@ -4,8 +4,8 @@
 //
 //#include "test_utils/cpu_test_utils.hpp"
 //
-//#include "ngraph_functions/builders.hpp"
-//#include "ngraph_functions/utils/ngraph_helpers.hpp"
+//#include "ov_models/builders.hpp"
+//#include "ov_models/utils/ov_helpers.hpp"
 //
 //using namespace InferenceEngine;
 //using namespace CPUTestUtils;
@@ -58,7 +58,7 @@
 //        result << "Stop_" << stop << "_";
 //        result << "Step_" << step << "_";
 //        result << CPUTestsBase::getTestCaseName(cpuParams);
-//        result << CommonTestUtils::vec2str(shapes.second[0]) << "_";
+//        result << ov::test::utils::vec2str(shapes.second[0]) << "_";
 //        return result.str();
 //    }
 //protected:
@@ -112,17 +112,17 @@
 //        step = std::get<2>(rangeInputs);
 //        auto ngOutPr = FuncTestUtils::PrecisionUtils::convertIE2nGraphPrc(outPrc);
 //        auto ngNetPrc = FuncTestUtils::PrecisionUtils::convertIE2nGraphPrc(inPrc);
-//        auto startPar = std::make_shared<ngraph::opset5::Parameter>(ngNetPrc, ngraph::Shape{});
-//        auto stopPar = std::make_shared<ngraph::opset5::Parameter>(ngNetPrc, ngraph::Shape{});
-//        auto stepPar = std::make_shared<ngraph::opset5::Parameter>(ngNetPrc, ngraph::Shape{});
-//        auto range = std::make_shared<ngraph::opset4::Range>(startPar, stopPar, stepPar, ngOutPr);
+//        auto startPar = std::make_shared<ov::op::v0::Parameter>(ngNetPrc, ngraph::Shape{});
+//        auto stopPar = std::make_shared<ov::op::v0::Parameter>(ngNetPrc, ngraph::Shape{});
+//        auto stepPar = std::make_shared<ov::op::v0::Parameter>(ngNetPrc, ngraph::Shape{});
+//        auto range = std::make_shared<ov::op::v4::Range>(startPar, stopPar, stepPar, ngOutPr);
 //        range->get_rt_info() = getCPUInfo();
 //        selectedType = std::string("ref_any_") + (inPrc == outPrc ? inPrc.name() : "FP32");
 //        startPar->set_friendly_name("start");
 //        stopPar->set_friendly_name("stop");
 //        stepPar->set_friendly_name("step");
 //
-//        const ngraph::ResultVector results{std::make_shared<ngraph::opset3::Result>(range)};
+//        const ngraph::ResultVector results{std::make_shared<ov::op::v0::Result>(range)};
 //        function = std::make_shared<ngraph::Function>(results, ngraph::ParameterVector {
 //            startPar, stopPar, stepPar}, "Range");
 //        functionRefs = ngraph::clone_function(*function);
@@ -181,13 +181,13 @@
 //        ::testing::Combine(
 //                rangeParDynamic,
 //                ::testing::ValuesIn(netPrecisions),
-//                ::testing::Values(CommonTestUtils::DEVICE_CPU)),
+//                ::testing::Values(ov::test::utils::DEVICE_CPU)),
 //        ::testing::ValuesIn(filterCPUInfoForDevice()));
 //const auto params3dPseudoStatic = ::testing::Combine(
 //        ::testing::Combine(
 //                rangeParStatic,
 //                ::testing::ValuesIn(netPrecisions),
-//                ::testing::Values(CommonTestUtils::DEVICE_CPU)),
+//                ::testing::Values(ov::test::utils::DEVICE_CPU)),
 //        ::testing::ValuesIn(filterCPUInfoForDevice()));
 //// We don't check static case, because of constant folding, but we can use static shape for test infrastructure,
 //// however Range node will be dynamic, since inputs are parameters, not a constants

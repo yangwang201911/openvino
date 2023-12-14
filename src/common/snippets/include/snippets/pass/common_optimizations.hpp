@@ -5,16 +5,22 @@
 #pragma once
 
 #include "openvino/pass/graph_rewrite.hpp"
-#include "openvino/pass/pattern/matcher.hpp"
+#include "snippets/pass/tokenization.hpp"
 
 namespace ov {
 namespace snippets {
 namespace pass {
 
 class CommonOptimizations : public ov::pass::MatcherPass {
+    class SubgraphPass;
+    class SubgraphManager;
+    friend class ExtractConstants;
+    friend class ExtractUnsupportedTransposes;
+    friend class SplitDimensionM;
+
 public:
     OPENVINO_RTTI("CommonOptimizations", "0");
-    CommonOptimizations();
+    CommonOptimizations(const SnippetsTokenization::Config& config = {});
 };
 
 }  // namespace pass

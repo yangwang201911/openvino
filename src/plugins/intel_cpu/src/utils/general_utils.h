@@ -44,6 +44,15 @@ constexpr inline bool implication(bool cause, bool cond) {
     return !cause || !!cond;
 }
 
+#ifdef __cpp_lib_make_unique
+using std::make_unique;
+#else
+template <class T, class... Args>
+inline std::unique_ptr<T> make_unique(Args&&... args) {
+    return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
+}
+#endif
+
 template<typename T>
 std::string vec2str(const std::vector<T> &vec) {
     if (!vec.empty()) {
@@ -122,15 +131,15 @@ inline bool dimsEqualWeak(const std::vector<size_t>& lhs, const std::vector<size
     return true;
 }
 
-inline InferenceEngine::Precision getMaxPrecision(std::vector<InferenceEngine::Precision> precisions) {
+inline ov::element::Type getMaxPrecision(std::vector<ov::element::Type> precisions) {
     if (!precisions.empty()) {
         return *std::max_element(precisions.begin(), precisions.end(),
-                                 [](const InferenceEngine::Precision &lhs, const InferenceEngine::Precision &rhs) {
+                                 [](const ov::element::Type &lhs, const ov::element::Type &rhs) {
                                      return lhs.size() > rhs.size();
                                  });
     }
 
-    return InferenceEngine::Precision::UNSPECIFIED;
+    return ov::element::undefined;
 }
 
 inline std::vector<std::string> split(const std::string &str, char delim) {

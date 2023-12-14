@@ -10,6 +10,7 @@
 
 #include "openvino/opsets/opset1.hpp"
 #include "openvino/op/util/op_types.hpp"
+#include "openvino/core/rt_info.hpp"
 
 #include <numeric>
 
@@ -43,9 +44,8 @@ ov::Output<ov::Node> ov::snippets::pass::InsertMoveBroadcast::BroadcastNodeLastD
     // will be handled by pointer arithmetics inside outer LoopEmitter
     if (*target_shape.rbegin() != *normalized_shape.rbegin()) {
         ov::PartialShape broadcasted_shape = normalized_shape;
-        *broadcasted_shape.rbegin() = *target_shape.rbegin();
-        const auto broadcast_node = std::make_shared<ov::snippets::op::BroadcastMove>(value, broadcasted_shape);
-        utils::safe_copy_runtime_info(value.get_node_shared_ptr(), broadcast_node);
+        const auto broadcast_node = std::make_shared<ov::snippets::op::BroadcastMove>(value, *target_shape.rbegin());
+        copy_runtime_info(value.get_node_shared_ptr(), broadcast_node);
 
         return broadcast_node->output(0);
     }

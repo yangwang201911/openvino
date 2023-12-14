@@ -118,15 +118,23 @@ std::vector<std::string> disabledTestPatterns() {
         R"(.*ReferenceInterpolate_v11.*data_type=f16.*)",
         R"(.*LSTMSequence_With_Hardcoded_Refs.*ReferenceLSTMSequenceTest.*iType=f16.*)",
         // CVS-111443
-        R"(.*eltwiseOpType=Mod_secondaryInputType=PARAMETER_opType=VECTOR_NetType=(f16|f32).*)"
+        R"(.*eltwiseOpType=Mod_secondaryInputType=PARAMETER_opType=VECTOR_NetType=(f16|f32).*)",
+        // Interpreter backend doesn't implement evaluate method for OP Multiply (by GroupNormalizationDecomposition)
+        R"(.*ReferenceGroupNormalization.*_f64*)",
     };
 
 #ifdef _WIN32
     // CVS-63989
     retVector.emplace_back(R"(.*ReferenceSigmoidLayerTest.*u64.*)");
-    // CVS-64054
+    // CVS-120988
     retVector.emplace_back(R"(.*ReferenceTopKTest.*topk_max_sort_none)");
     retVector.emplace_back(R"(.*ReferenceTopKTest.*topk_min_sort_none)");
+#endif
+
+#if defined(__APPLE__) && defined(OPENVINO_ARCH_X86_64)
+    // CVS-120988
+    retVector.emplace_back(R"(.*ReferenceTopKTest.*aType=(u32|u64).*topk_(max|min)_sort_none)");
+    retVector.emplace_back(R"(.*ReferenceTopKTest.*aType=(i32|i64|f16|f32).*topk_min_sort_none)");
 #endif
 
 #if defined(OPENVINO_ARCH_ARM64) || defined(OPENVINO_ARCH_ARM)

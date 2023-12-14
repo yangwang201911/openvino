@@ -5,6 +5,7 @@
 
 #include "behavior/ov_infer_request/perf_counters.hpp"
 #include "openvino/runtime/profiling_info.hpp"
+#include "common_test_utils/subgraph_builders/concat_with_params.hpp"
 
 namespace ov {
 namespace test {
@@ -13,10 +14,27 @@ void OVInferRequestPerfCountersTest::SetUp() {
     std::tie(target_device, configuration) = this->GetParam();
     SKIP_IF_CURRENT_TEST_IS_DISABLED()
     APIBaseTest::SetUp();
-    function = ngraph::builder::subgraph::makeConcatWithParams();
+    function = ov::test::utils::make_concat_with_params();
     configuration.insert(ov::enable_profiling(true));
     execNet = core->compile_model(function, target_device, configuration);
     req = execNet.create_infer_request();
+}
+
+std::string OVInferRequestPerfCountersTest::getTestCaseName(testing::TestParamInfo<InferRequestParams> obj) {
+    std::string targetDevice;
+    ov::AnyMap configuration;
+    std::tie(targetDevice, configuration) = obj.param;
+    std::replace(targetDevice.begin(), targetDevice.end(), ':', '.');
+    std::ostringstream result;
+    result << "targetDevice=" << targetDevice << "_";
+    if (!configuration.empty()) {
+        using namespace ov::test::utils;
+        for (auto &configItem : configuration) {
+            result << "configItem=" << configItem.first << "_";
+            configItem.second.print(result);
+        }
+    }
+    return result.str();
 }
 
 TEST_P(OVInferRequestPerfCountersTest, NotEmptyAfterAsyncInfer) {

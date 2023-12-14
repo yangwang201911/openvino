@@ -3,7 +3,7 @@
 //
 
 #include "base/import_export_base.hpp"
-#include "ngraph_functions/builders.hpp"
+#include "ov_models/builders.hpp"
 
 namespace LayerTestsDefinitions {
 
@@ -16,16 +16,16 @@ protected:
             this->GetParam();
         auto ngPrc = FuncTestUtils::PrecisionUtils::convertIE2nGraphPrc(netPrecision);
 
-        auto params = ngraph::builder::makeParams(ngPrc, {inputShape});
+        ov::ParameterVector params{std::make_shared<ov::op::v0::Parameter>(ngPrc, ov::Shape(inputShape))};
 
         std::vector<size_t> outFormShapes1 = {1, 1, 168, 2};
         auto pattern1 =
-            std::make_shared<ngraph::opset1::Constant>(ngraph::element::Type_t::i64, ngraph::Shape{4}, outFormShapes1);
-        auto reshape1 = std::make_shared<ngraph::opset1::Reshape>(params[0], pattern1, false);
+            std::make_shared<ov::op::v0::Constant>(ngraph::element::Type_t::i64, ngraph::Shape{4}, outFormShapes1);
+        auto reshape1 = std::make_shared<ov::opset1::Reshape>(params[0], pattern1, false);
 
-        auto permute1 = std::make_shared<ngraph::opset1::Transpose>(
+        auto permute1 = std::make_shared<ov::opset1::Transpose>(
             reshape1,
-            ngraph::opset1::Constant::create(ngraph::element::i64, ngraph::Shape{4}, {0, 3, 1, 2}));
+            ov::op::v0::Constant::create(ngraph::element::i64, ngraph::Shape{4}, {0, 3, 1, 2}));
 
         auto conv1 = ngraph::builder::makeConvolution(permute1,
                                                       ngPrc,
@@ -37,16 +37,16 @@ protected:
                                                       ngraph::op::PadType::VALID,
                                                       12);
 
-        auto permute2 = std::make_shared<ngraph::opset1::Transpose>(
+        auto permute2 = std::make_shared<ov::opset1::Transpose>(
             conv1,
-            ngraph::opset1::Constant::create(ngraph::element::i64, ngraph::Shape{4}, {0, 2, 3, 1}));
+            ov::op::v0::Constant::create(ngraph::element::i64, ngraph::Shape{4}, {0, 2, 3, 1}));
 
         std::vector<size_t> outFormShapes2 = {1, 1932};
         auto pattern2 =
-            std::make_shared<ngraph::opset1::Constant>(ngraph::element::Type_t::i64, ngraph::Shape{2}, outFormShapes2);
-        auto reshape2 = std::make_shared<ngraph::opset1::Reshape>(permute2, pattern2, false);
+            std::make_shared<ov::op::v0::Constant>(ngraph::element::Type_t::i64, ngraph::Shape{2}, outFormShapes2);
+        auto reshape2 = std::make_shared<ov::opset1::Reshape>(permute2, pattern2, false);
 
-        ngraph::ResultVector results{std::make_shared<ngraph::opset1::Result>(reshape2)};
+        ngraph::ResultVector results{std::make_shared<ov::op::v0::Result>(reshape2)};
         function = std::make_shared<ngraph::Function>(results, params, "ExportImportNetwork");
     };
 };
@@ -124,7 +124,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_ImportNetworkGNA,
                          ImportExportGNAModelUnchanged,
                          ::testing::Combine(::testing::ValuesIn(inputShapes),
                                             ::testing::ValuesIn(netPrecisions),
-                                            ::testing::Values(CommonTestUtils::DEVICE_GNA),
+                                            ::testing::Values(ov::test::utils::DEVICE_GNA),
                                             ::testing::ValuesIn(exportConfigs),
                                             ::testing::ValuesIn(importConfigsUnchanged),
                                             ::testing::ValuesIn(appHeaders)),
@@ -134,7 +134,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_ImportNetworkGNA,
                          ImportExportGNAModelChanged,
                          ::testing::Combine(::testing::ValuesIn(inputShapes),
                                             ::testing::ValuesIn(netPrecisions),
-                                            ::testing::Values(CommonTestUtils::DEVICE_GNA),
+                                            ::testing::Values(ov::test::utils::DEVICE_GNA),
                                             ::testing::ValuesIn(exportConfigs),
                                             ::testing::ValuesIn(importConfigsChanged),
                                             ::testing::ValuesIn(appHeaders)),

@@ -4,20 +4,13 @@
 
 #include <gtest/gtest.h>
 
-#include <common_test_utils/ov_tensor_utils.hpp>
-#include <ngraph_functions/builders.hpp>
-#include <string>
-#include <tuple>
-#include <vector>
-
+#include "common_test_utils/ov_tensor_utils.hpp"
 #include "shared_test_classes/base/ov_subgraph.hpp"
 #include "test_utils/cpu_test_utils.hpp"
 
-using namespace InferenceEngine;
 using namespace CPUTestUtils;
-using namespace ov::test;
-
-namespace CPULayerTestsDefinitions {
+namespace ov {
+namespace test {
 
 using CtcGreedyDecoderSeqLenParams = std::tuple<size_t,   // Batch size N
                                                 size_t,   // Sequence length T
@@ -33,16 +26,6 @@ using CTCGreedyDecoderSeqLenLayerCPUTestParams = std::tuple<InputShapeParams,   
                                                             ElementType,         // Index Type
                                                             bool                 // mergeRepeated
                                                             >;
-inline ngraph::ParameterVector makeDynamicParams(const std::vector<ElementType>& types,
-                                          const std::vector<ov::PartialShape>& shapes) {
-    ngraph::ParameterVector outs;
-    NGRAPH_CHECK(types.size() == shapes.size());
-    for (size_t i = 0; i < types.size(); i++) {
-        auto paramNode = std::make_shared<ov::op::v0::Parameter>(types[i], shapes[i]);
-        outs.push_back(paramNode);
-    }
-    return outs;
-}
 
 class CTCGreedyDecoderSeqLenLayerCPUTest : public testing::WithParamInterface<CTCGreedyDecoderSeqLenLayerCPUTestParams>,
                                            virtual public SubgraphBaseTest,
@@ -55,7 +38,7 @@ public:
         ElementType indexType;
         std::tie(shapes, inType, indexType, mergeRepeated) = obj.param;
         std::ostringstream results;
-        results << "IS=" << CommonTestUtils::partialShape2str({shapes.first}) << "_";
+        results << "IS=" << ov::test::utils::partialShape2str({shapes.first}) << "_";
         results << "TS=";
         for (const auto& shape : shapes.second) {
             size_t N;
@@ -83,8 +66,8 @@ protected:
         InputShapeParams shapes;
         ElementType indexType;
         std::tie(shapes, inType, indexType, mergeRepeated) = GetParam();
-        selectedType = "ref_any_FP32";
-        targetDevice = CommonTestUtils::DEVICE_CPU;
+        selectedType = "ref_any_f32";
+        targetDevice = ov::test::utils::DEVICE_CPU;
         ASSERT_EQ(shapes.first.size(), 4);
         const auto& in_dyn_N = shapes.first[0];
         const auto& in_dyn_T = shapes.first[1];
@@ -95,6 +78,7 @@ protected:
         inputDynamicShapes = {ov::PartialShape{in_dyn_N, in_dyn_T, in_dyc_C},
                               ov::PartialShape{in_dyn_N},
                               blank_rank == 0 ? ov::PartialShape{} : ov::PartialShape{1}};
+        OPENVINO_ASSERT(inType.size() == inputDynamicShapes.size());
 
         for (auto& shape : shapes.second) {
             size_t N;
@@ -107,7 +91,11 @@ protected:
                 targetStaticShapes.push_back({{N, T, C}, {N}, {1}});
         }
 
-        auto params = makeDynamicParams(inType, inputDynamicShapes);
+        ov::ParameterVector params;
+        for (size_t i = 0; i < inType.size(); i++) {
+            auto param_node = std::make_shared<ov::op::v0::Parameter>(inType[i], inputDynamicShapes[i]);
+            params.push_back(param_node);
+        }
         auto ctcGreedyDecoderSeqLen = std::make_shared<ov::op::v6::CTCGreedyDecoderSeqLen>(params[0],
                                                                                            params[1],
                                                                                            params[2],
@@ -115,27 +103,26 @@ protected:
                                                                                            indexType,
                                                                                            indexType);
 
-        ngraph::ResultVector results{std::make_shared<ngraph::opset1::Result>(ctcGreedyDecoderSeqLen)};
-        function = std::make_shared<ngraph::Function>(results, params, "CTCGreedyDecoderSeqLenCPU");
+        ov::ResultVector results{std::make_shared<ov::op::v0::Result>(ctcGreedyDecoderSeqLen)};
+        function = std::make_shared<ov::Model>(results, params, "CTCGreedyDecoderSeqLenCPU");
     };
 
-    void generate_inputs(const std::vector<ngraph::Shape>& targetInputStaticShapes) override {
+    void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
         inputs.clear();
         const auto& funcInputs = function->inputs();
         const auto& dataShape = targetInputStaticShapes[0];
-        for (int i = 0; i < funcInputs.size(); ++i) {
+        for (size_t i = 0; i < funcInputs.size(); ++i) {
             const auto& funcInput = funcInputs[i];
             ov::Tensor tensor;
             if (i == 0) {
                 if (funcInput.get_element_type().is_real()) {
-                    tensor = ov::test::utils::create_and_fill_tensor(funcInput.get_element_type(),
-                                                                     targetInputStaticShapes[i],
-                                                                     10,
-                                                                     0,
-                                                                     1000);
+                    ov::test::utils::InputGenerateData in_data;
+                    in_data.start_from = 0;
+                    in_data.range = 10;
+                    in_data.resolution = 1000;
+                    tensor = ov::test::utils::create_and_fill_tensor(funcInput.get_element_type(), targetInputStaticShapes[i], in_data);
                 } else {
-                    tensor = ov::test::utils::create_and_fill_tensor(funcInput.get_element_type(),
-                                                                     targetInputStaticShapes[i]);
+                    tensor = ov::test::utils::create_and_fill_tensor(funcInput.get_element_type(), targetInputStaticShapes[i]);
                 }
             } else if (i == 1) {
                 const auto seqLen = dataShape[1];
@@ -144,7 +131,7 @@ protected:
                 std::uniform_int_distribution<unsigned long> dist(1, seqLen);
 
                 std::vector<int32_t> sequenceLenData(B, 0);
-                for (int b = 0; b < B; b++) {
+                for (size_t b = 0; b < B; b++) {
                     const int len = dist(gen);
                     sequenceLenData[b] = len;
                 }
@@ -159,10 +146,10 @@ protected:
 
             } else if (i == 2) {
                 // blank should be valid class type
-                tensor = ov::test::utils::create_and_fill_tensor(funcInput.get_element_type(),
-                                                                 targetInputStaticShapes[i],
-                                                                 dataShape[2],
-                                                                 0);
+                ov::test::utils::InputGenerateData in_data;
+                in_data.start_from = 0;
+                in_data.range = dataShape[2];
+                tensor = ov::test::utils::create_and_fill_tensor(funcInput.get_element_type(), targetInputStaticShapes[i], in_data);
             }
             inputs.insert({funcInput.get_node_shared_ptr(), tensor});
         }
@@ -212,4 +199,5 @@ INSTANTIATE_TEST_SUITE_P(smoke_CtcGreedyDecoderSeqLenCPU,
                          CTCGreedyDecoderSeqLenLayerCPUTest::getTestCaseName);
 }  // namespace
 
-}  // namespace CPULayerTestsDefinitions
+}  // namespace test
+}  // namespace ov

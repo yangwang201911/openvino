@@ -47,8 +47,8 @@ constexpr int threshold_for_mask_emu_store = 6;
 size_t load_emitter_params::hash() const {
     size_t seed = 0;
     seed = hash_combine(seed, std::string("jit_load_emitter"));
-    seed = hash_combine(seed, src_prc_.getPrecVal());
-    seed = hash_combine(seed, dst_prc_.getPrecVal());
+    seed = hash_combine(seed, src_prc_.hash());
+    seed = hash_combine(seed, dst_prc_.hash());
     seed = hash_combine(seed, load_num_);
     seed = hash_combine(seed, is_fill_);
     seed = hash_combine(seed, fill_value_);
@@ -58,8 +58,8 @@ size_t load_emitter_params::hash() const {
 size_t store_emitter_params::hash() const {
     size_t seed = 0;
     seed = hash_combine(seed, std::string("jit_store_emitter"));
-    seed = hash_combine(seed, src_prc_.getPrecVal());
-    seed = hash_combine(seed, dst_prc_.getPrecVal());
+    seed = hash_combine(seed, src_prc_.hash());
+    seed = hash_combine(seed, dst_prc_.hash());
     seed = hash_combine(seed, store_num_);
     return seed;
 }
@@ -74,7 +74,7 @@ static int get_aux_regs_as_temp(const size_t byte_size, const bool is_fill = fal
 
 /// LOAD ///
 jit_load_emitter::jit_load_emitter(dnnl::impl::cpu::x64::jit_generator *host, dnnl::impl::cpu::x64::cpu_isa_t host_isa,
-                                   Precision src_prc, Precision dst_prc, int load_num, Precision exec_prc,
+                                   ov::element::Type src_prc, ov::element::Type dst_prc, int load_num, ov::element::Type exec_prc,
                                    bool is_fill, std::string fill_value, emitter_in_out_map in_out_type)
 : jit_emitter(host, host_isa, exec_prc, in_out_type), name_("unknown"), load_num_(load_num), src_prc_(src_prc),
     dst_prc_(dst_prc), is_fill_(is_fill), fill_value_(fill_value) {
@@ -105,18 +105,20 @@ void jit_load_emitter::emit_impl(const std::vector<size_t> &in_idxs, const std::
     } else if (host_isa_ == cpu::x64::avx512_core) {
         emit_isa<cpu::x64::avx512_core>(Reg64(in_idxs[0]), static_cast<int>(out_idxs[0]), offset);
     } else {
-        IE_THROW() << "Load emitter in " << name_ << " is performed on unsupported isa(at least x64::sse41).";
+        OPENVINO_THROW("Load emitter in ", name_, " is performed on unsupported isa(at least x64::sse41).");
     }
 }
 
 template <dnnl::impl::cpu::x64::cpu_isa_t isa>
 void jit_load_emitter::emit_isa(const Xbyak::Reg64 &reg_src, const int out_vec_idx, const int offset) const {
-    bool matched_prc = (dst_prc_ == src_prc_) || (dst_prc_ == Precision::FP32) || (dst_prc_ == Precision::I32);
+    bool matched_prc = (dst_prc_ == src_prc_) || (dst_prc_ == ov::element::f32) || (dst_prc_ == ov::element::i32);
     if (!matched_prc) {
-        IE_THROW() << "Load emitter in " << name_ << " only support output precision of FP32 or I32 or the same precision as input.";
+        OPENVINO_THROW("Load emitter in ",
+                       name_,
+                       " only support output precision of FP32 or I32 or the same precision as input.");
     }
-    if (load_num_ > (get_vec_length() / dst_prc_.size())) {
-        IE_THROW() << "Load emitter in " << name_ << " have unexpected number of elements to load.";
+    if (load_num_ > static_cast<int>((get_vec_length() / dst_prc_.size()))) {
+        OPENVINO_THROW("Load emitter in ", name_, " have unexpected number of elements to load.");
     }
 
     using Vmm = typename conditional3<isa == cpu::x64::sse41, Xmm, isa == cpu::x64::avx2, Ymm, Zmm>::type;
@@ -127,39 +129,36 @@ void jit_load_emitter::emit_isa(const Xbyak::Reg64 &reg_src, const int out_vec_i
     } else {
     // "pure load" + convert. dst_prc must be FP32 or I32.
         switch (src_prc_) {
-            case Precision::FP32:
-            case Precision::I32:
+            case ov::element::f32:
+            case ov::element::i32:
                 load_bytes<Vmm>(Vmm(out_vec_idx), reg_src, offset, load_size_);
                 break;
-            case Precision::I8:
+            case ov::element::i8:
                 load_bytes_to_dword_extension<Vmm>(Vmm(out_vec_idx), reg_src, offset, true, load_size_);
                 break;
-            case Precision::U8:
+            case ov::element::u8:
                 load_bytes_to_dword_extension<Vmm>(Vmm(out_vec_idx), reg_src, offset, false, load_size_);
                 break;
-            case Precision::I16:
-                load_words_to_dword_extension<Vmm>(Vmm(out_vec_idx), reg_src, offset, false, true, load_size_);
-                break;
-            case Precision::U16:
-                load_words_to_dword_extension<Vmm>(Vmm(out_vec_idx), reg_src, offset, false, false, load_size_);
-                break;
-            case Precision::BF16:
-                load_words_to_dword_extension<Vmm>(Vmm(out_vec_idx), reg_src, offset, true, false, load_size_);
+            case ov::element::i16:
+            case ov::element::u16:
+            case ov::element::bf16:
+            case ov::element::f16:
+                load_words_to_dword_extension<Vmm>(Vmm(out_vec_idx), reg_src, offset, src_prc_, load_size_);
                 break;
             default:
-                IE_THROW() << "Load emitter in " << name_ << " has unsupported src precision to load.";
+                OPENVINO_THROW("Load emitter in ", name_, " has unsupported src precision to load.");
         }
     }
 
     // post convert between I32 and FP32
     if (src_prc_ != dst_prc_) {
         switch (dst_prc_) {
-            case Precision::FP32:
-                if ((src_prc_ != Precision::FP32) && (src_prc_ != Precision::BF16))
+            case ov::element::f32:
+                if (!src_prc_.is_real())
                     h->uni_vcvtdq2ps(Vmm(out_vec_idx), Vmm(out_vec_idx));
                 break;
-            case Precision::I32:
-                if ((src_prc_ == Precision::FP32) || (src_prc_ == Precision::BF16)) {
+            case ov::element::i32:
+                if (src_prc_.is_real()) {
                     h->uni_vcvtps2dq(Vmm(out_vec_idx), Vmm(out_vec_idx));
                 }
                 break;
@@ -198,12 +197,12 @@ void jit_load_emitter::load_bytes(const Vmm &vmm, const Xbyak::Reg64 &reg, int o
 
     // Ensure data fits completely inside the Xmm/Ymm/Zmm register
     if (load_size < 0 || load_size > 64)
-        IE_THROW() << "Load emitter in " << name_ << " has unexpected number of values to load in load_byte.";
+        OPENVINO_THROW("Load emitter in ", name_, " has unexpected number of values to load in load_byte.");
     // check if proper number bytes fit inside the Xmm/Ymm register
     if (is_ymm && load_size > 32)
-        IE_THROW() << "Load emitter in " << name_ << " has unexpected number of values to load to ymm in load_byte.";
+        OPENVINO_THROW("Load emitter in ", name_, " has unexpected number of values to load to ymm in load_byte.");
     if (is_xmm && load_size > 16)
-        IE_THROW() << "Load emitter in " << name_ << " has unexpected number of values to load to xmm in load_byte.";
+        OPENVINO_THROW("Load emitter in ", name_, " has unexpected number of values to load to xmm in load_byte.");
 
     auto xmm = Xbyak::Xmm(vmm.getIdx());
     auto ymm = Xbyak::Ymm(vmm.getIdx());
@@ -237,6 +236,18 @@ void jit_load_emitter::load_bytes(const Vmm &vmm, const Xbyak::Reg64 &reg, int o
             has_xmm_block = true;
         }
 
+        // Cornerstone of partial load is combinaion of vpinsrb/w/d.
+        // As vpinsrb/w/d will not only write(insert) values into vmm, but also read values in vmm to copy from to positions that not in imm mask,
+        // this could introduce RAW false dependency(we actually do not care about values not in imm mask).
+        // To eliminate this false dependency,
+        // 1. For 1/2/3/4 bytes tails, replace vpinsrb/w/d with mov,shl etc instructions that don't read vmm.
+        //    Besides eliminate RAW, these instructions have smaller latency, which also bring better perf, especially for small loop iteration case.
+        // 2. For 8/16 bytes, use vmovq/vmovdqu instructions to load, which also don't read src vmm.
+        // 3. For other size, insert vpxor before vpinsrb/w/d. vpxor and read vmm instructions in previous loop have WAR(write after read) relationship.
+        //    CPU can identify this scenario and assign another physical vector register(register renameing) in next loop to eliminate RAW.
+        if (!one_of(bytes_to_load, 0, 1, 2, 3, 4, 8, 16)) {
+            h->uni_vpxor(vmm, vmm, vmm);
+        }
         if (bytes_to_load >= 8 && bytes_to_load < 16)
             h->uni_vmovq(xmm, addr(start_bytes));
         else if (bytes_to_load == 16)
@@ -295,7 +306,7 @@ void jit_load_emitter::load_bytes(const Vmm &vmm, const Xbyak::Reg64 &reg, int o
                 break;
             case 16: break;
             default:
-                IE_THROW() << "Load emitter in " << name_ << " has unexpected number of values to load in load_byte.";
+                OPENVINO_THROW("Load emitter in ", name_, " has unexpected number of values to load in load_byte.");
         }
 
         if (has_xmm_block) {
@@ -370,11 +381,17 @@ void jit_load_emitter::load_bytes_to_dword_extension(const Vmm &vmm, const Xbyak
     // For Ymm register, load capacity is halved (32 * load_size <= 256)
     // For Xmm register, load capacity is halved further (32 * load_size <= 128)
     if (load_size < 0 || load_size > 16)
-        IE_THROW() << "Load emitter in " << name_ << " has unexpected number of values to load in load_bytes_to_dword_extension.";
+        OPENVINO_THROW("Load emitter in ",
+                       name_,
+                       " has unexpected number of values to load in load_bytes_to_dword_extension.");
     if (is_ymm && load_size > 8)
-        IE_THROW() << "Load emitter in " << name_ << " has unexpected number of values to load to ymm in load_bytes_to_dword_extension.";
+        OPENVINO_THROW("Load emitter in ",
+                       name_,
+                       " has unexpected number of values to load to ymm in load_bytes_to_dword_extension.");
     if (is_xmm && load_size > 4)
-        IE_THROW() << "Load emitter in " << name_ << " has unexpected number of values to load to xmm in load_bytes_to_dword_extension.";
+        OPENVINO_THROW("Load emitter in ",
+                       name_,
+                       " has unexpected number of values to load to xmm in load_bytes_to_dword_extension.");
 
     // For load_size == 4/8/16, do load/extension in one go
     switch (load_size) {
@@ -447,7 +464,7 @@ void jit_load_emitter::load_bytes_to_dword_extension(const Vmm &vmm, const Xbyak
 * [0.. 32] for ZMM version of the function. i.e. 16 words -> 16 * 32 bit == 512 bit
 */
 template <typename Vmm>
-void jit_load_emitter::load_words_to_dword_extension(const Vmm &vmm, const Xbyak::Reg64 &reg, int offset, bool is_bf16, bool is_signed, int load_size) const {
+void jit_load_emitter::load_words_to_dword_extension(const Vmm &vmm, const Xbyak::Reg64 &reg, int offset, ov::element::Type prc, int load_size) const {
     constexpr bool is_xmm = std::is_same<Vmm, Xbyak::Xmm>::value;
     constexpr bool is_ymm = std::is_same<Vmm, Xbyak::Ymm>::value;
     constexpr bool is_zmm = std::is_same<Vmm, Xbyak::Zmm>::value;
@@ -456,15 +473,28 @@ void jit_load_emitter::load_words_to_dword_extension(const Vmm &vmm, const Xbyak
     MAYBE_UNUSED(is_ymm);
     MAYBE_UNUSED(is_zmm);
 
+    bool is_bf16 = (prc == ov::element::bf16);
+    bool is_f16 = (prc == ov::element::f16);
+    bool is_signed = prc.is_signed();
+
+    if (is_f16 && !mayiuse(cpu::x64::avx512_core_fp16))
+        OPENVINO_THROW("Load emitter in ", name_, " only support fp16 on platform with avx512_core_fp16.");
+
     // Ensure extended double words fit inside Zmm (32/2(num) * 32 <= 512)
     // For Ymm register, load capacity is halved (16/2(num) * 32 <= 128)
     // For Xmm register, load capacity is halved again (8/2(num) * 32 <= 128)
     if (load_size < 0 || load_size > 32)
-        IE_THROW() << "Load emitter in " << name_ << " has unexpected number of values to load in load_words_to_dword_extension.";
+        OPENVINO_THROW("Load emitter in ",
+                       name_,
+                       " has unexpected number of values to load in load_words_to_dword_extension.");
     if (is_ymm && load_size > 16)
-        IE_THROW() << "Load emitter in " << name_ << " has unexpected number of values to load to ymm in load_words_to_dword_extension.";
+        OPENVINO_THROW("Load emitter in ",
+                       name_,
+                       " has unexpected number of values to load to ymm in load_words_to_dword_extension.");
     if (is_xmm && load_size > 8)
-        IE_THROW() << "Load emitter in " << name_ << " has unexpected number of values to load to xmm in load_words_to_dword_extension.";
+        OPENVINO_THROW("Load emitter in ",
+                       name_,
+                       " has unexpected number of values to load to xmm in load_words_to_dword_extension.");
 
     auto xmm = Xbyak::Xmm(vmm.getIdx());
     auto ymm = Xbyak::Ymm(vmm.getIdx());
@@ -477,6 +507,8 @@ void jit_load_emitter::load_words_to_dword_extension(const Vmm &vmm, const Xbyak
             if (is_bf16) {
                 h->uni_vpmovzxwd(zmm, ptr[reg + offset]);
                 h->uni_vpslld(zmm, zmm, 16);
+            } else if (is_f16) {
+                h->vcvtph2ps(zmm, ptr[reg + offset]);
             } else {
                 if (is_signed)
                     h->uni_vpmovsxwd(zmm, ptr[reg + offset]);
@@ -489,6 +521,8 @@ void jit_load_emitter::load_words_to_dword_extension(const Vmm &vmm, const Xbyak
             if (is_bf16) {
                 h->uni_vpmovzxwd(ymm, ptr[reg + offset]);
                 h->uni_vpslld(ymm, ymm, 16);
+            } else if (is_f16) {
+                h->vcvtph2ps(ymm, ptr[reg + offset]);
             } else {
                 if (is_signed)
                     h->uni_vpmovsxwd(ymm, ptr[reg + offset]);
@@ -501,6 +535,8 @@ void jit_load_emitter::load_words_to_dword_extension(const Vmm &vmm, const Xbyak
             if (is_bf16) {
                 h->uni_vpmovzxwd(xmm, ptr[reg + offset]);
                 h->uni_vpslld(xmm, xmm, 16);
+            } else if (is_f16) {
+                h->vcvtph2ps(xmm, ptr[reg + offset]);
             } else {
                 if (is_signed)
                     h->uni_vpmovsxwd(xmm, ptr[reg + offset]);
@@ -518,6 +554,8 @@ void jit_load_emitter::load_words_to_dword_extension(const Vmm &vmm, const Xbyak
                 if (is_bf16) {
                     h->uni_vpmovzxwd(vmm | k_mask | T_z, ptr[reg + offset]);
                     h->uni_vpslld(vmm, vmm, 16);
+                } else if (is_f16) {
+                    h->vcvtph2ps(vmm | k_mask | T_z, ptr[reg + offset]);
                 } else {
                     if (is_signed)
                         h->uni_vpmovsxwd(vmm | k_mask | T_z, ptr[reg + offset]);
@@ -530,6 +568,8 @@ void jit_load_emitter::load_words_to_dword_extension(const Vmm &vmm, const Xbyak
                 if (is_bf16) {
                     h->uni_vpmovzxwd(vmm, xmm);
                     h->uni_vpslld(vmm, vmm, 16);
+                } else if (is_f16) {
+                    h->vcvtph2ps(ymm, xmm);
                 } else {
                     if (is_signed)
                         h->uni_vpmovsxwd(vmm, xmm);
@@ -575,7 +615,7 @@ void jit_load_emitter::register_table_entries() {
 
 /// STORE ///
 jit_store_emitter::jit_store_emitter(dnnl::impl::cpu::x64::jit_generator *host, dnnl::impl::cpu::x64::cpu_isa_t host_isa,
-                                     Precision src_prc, Precision dst_prc, int store_num, arithmetic_mode mode, Precision exec_prc,
+                                     ov::element::Type src_prc, ov::element::Type dst_prc, int store_num, arithmetic_mode mode, ov::element::Type exec_prc,
                                      emitter_in_out_map in_out_type)
     : jit_emitter(host, host_isa, exec_prc, in_out_type), name_("unknown"), store_num_(store_num), src_prc_(src_prc), dst_prc_(dst_prc), mode_(mode) {
     prepare_table();
@@ -591,7 +631,7 @@ inline bool jit_store_emitter::is_saturation() const {
 // case for SSE and AVX2 when we should use AND to truncate values
 inline bool jit_store_emitter::is_truncation_emulation() const {
     return !mayiuse(cpu::x64::avx512_core) && !is_saturation() &&
-        src_prc_ != dst_prc_ && one_of(dst_prc_, Precision::U16, Precision::I16, Precision::U8, Precision::I8);
+        src_prc_ != dst_prc_ && one_of(dst_prc_, ov::element::u16, ov::element::i16, ov::element::u8, ov::element::i8);
 }
 
 size_t jit_store_emitter::aux_gprs_count() const {
@@ -614,11 +654,11 @@ size_t jit_store_emitter::aux_vecs_count() const {
         count++;
 
     // for data swapping to avoid using Xmm(0) as I/O xmm for jit_uni_vcvtneps2bf16
-    if ((host_isa_ == cpu::x64::sse41) && (src_prc_ == Precision::FP32 && dst_prc_ == Precision::BF16))
+    if ((host_isa_ == cpu::x64::sse41) && (src_prc_ == ov::element::f32 && dst_prc_ == ov::element::bf16))
         count++;
 
     // zero value, zeroed and passed from caller from performance standpoint(zeroed one time and not need preserve and restore status)
-    if (mayiuse(cpu::x64::avx512_core) && one_of(dst_prc_, Precision::U8, Precision::U16))
+    if (mayiuse(cpu::x64::avx512_core) && one_of(dst_prc_, ov::element::u8, ov::element::u16))
         count++;
 
     return count;
@@ -641,20 +681,22 @@ void jit_store_emitter::emit_impl(const std::vector<size_t> &in_idxs, const std:
     } else if (host_isa_ == cpu::x64::avx512_core) {
         emit_isa<cpu::x64::avx512_core>(static_cast<int>(in_idxs[0]), Reg64(out_idxs[0]), offset);
     } else {
-        IE_THROW() << "Store emitter in " << name_ << " is performed on unsupported isa(at least x64::sse41).";
+        OPENVINO_THROW("Store emitter in ", name_, " is performed on unsupported isa(at least x64::sse41).");
     }
 }
 
 template <dnnl::impl::cpu::x64::cpu_isa_t isa>
 void jit_store_emitter::emit_isa(const int in_vec_idx, const Xbyak::Reg64 &reg_dst, const int offset) const {
-    bool matched_prc = (src_prc_ == dst_prc_) || (src_prc_ == Precision::FP32) || (src_prc_ == Precision::I32);
+    bool matched_prc = (src_prc_ == dst_prc_) || (src_prc_ == ov::element::f32) || (src_prc_ == ov::element::i32);
     if (!matched_prc) {
-        IE_THROW() << "Store emitter in " << name_ << " only support input precision of FP32 or I32 or the same precision as output.";
+        OPENVINO_THROW("Store emitter in ",
+                       name_,
+                       " only support input precision of FP32 or I32 or the same precision as output.");
     }
-    if ((src_prc_ == Precision::FP32) || (src_prc_ == Precision::I32)) {
+    if ((src_prc_ == ov::element::f32) || (src_prc_ == ov::element::i32)) {
         if ((isa == cpu::x64::sse41 && store_num_ > 4) || (isa == cpu::x64::avx2 && store_num_ > 8) ||
             (isa == cpu::x64::avx512_core && store_num_ > 16) || store_num_ < 0) {
-            IE_THROW() << "Store emitter in " << name_ << " has unexpected number of values to store.";
+            OPENVINO_THROW("Store emitter in ", name_, " has unexpected number of values to store.");
         }
     }
     using Vmm = typename conditional3<isa == cpu::x64::sse41, Xmm, isa == cpu::x64::avx2, Ymm, Zmm>::type;
@@ -664,8 +706,8 @@ void jit_store_emitter::emit_isa(const int in_vec_idx, const Xbyak::Reg64 &reg_d
     aux_src_idx = aux_vec_idxs.back(); // for avoid src pollution
     if (src_prc_ != dst_prc_) {
         switch (src_prc_) {
-            case Precision::FP32:
-                if ((dst_prc_ != Precision::FP32) && (dst_prc_ != Precision::BF16)) {
+            case ov::element::f32:
+                if (!dst_prc_.is_real()) {
                     if (is_saturation()) {
                         h->uni_vcvtps2dq(Vmm(aux_src_idx), Vmm(data_idx));
                     } else {
@@ -675,8 +717,8 @@ void jit_store_emitter::emit_isa(const int in_vec_idx, const Xbyak::Reg64 &reg_d
                     data_reg_updated = true;
                 }
                 break;
-            case Precision::I32:
-                if ((dst_prc_ == Precision::FP32) || (dst_prc_ == Precision::BF16)) {
+            case ov::element::i32:
+                if (dst_prc_.is_real()) {
                     h->uni_vcvtdq2ps(Vmm(aux_src_idx), Vmm(data_idx));
                     data_idx = aux_src_idx;
                     data_reg_updated = true;
@@ -691,27 +733,24 @@ void jit_store_emitter::emit_isa(const int in_vec_idx, const Xbyak::Reg64 &reg_d
         store_bytes<Vmm>(reg_dst, offset, store_size_);
     } else {
         switch (dst_prc_) {
-            case Precision::FP32:
-            case Precision::I32:
+            case ov::element::f32:
+            case ov::element::i32:
                 store_bytes<Vmm>(reg_dst, offset, store_size_);
                 break;
-            case Precision::I8:
+            case ov::element::i8:
                 store_dword_to_byte_extension<Vmm>(reg_dst, offset, true, store_num_);
                 break;
-            case Precision::U8:
+            case ov::element::u8:
                 store_dword_to_byte_extension<Vmm>(reg_dst, offset, false, store_num_);
                 break;
-            case Precision::I16:
-                store_dword_to_word_extension<Vmm>(reg_dst, offset, false, true, store_num_);
-                break;
-            case Precision::U16:
-                store_dword_to_word_extension<Vmm>(reg_dst, offset, false, false, store_num_);
-                break;
-            case Precision::BF16:
-                store_dword_to_word_extension<Vmm>(reg_dst, offset, true, false, store_num_);
+            case ov::element::i16:
+            case ov::element::u16:
+            case ov::element::bf16:
+            case ov::element::f16:
+                store_dword_to_word_extension<Vmm>(reg_dst, offset, dst_prc_, store_num_);
                 break;
             default:
-                IE_THROW() << "Store emitter in " << name_ << " has unsupported dst precision to store.";
+                OPENVINO_THROW("Store emitter in ", name_, " has unsupported dst precision to store.");
         }
     }
 }
@@ -742,11 +781,11 @@ void jit_store_emitter::store_bytes(const Xbyak::Reg64 &reg, int offset, int sto
 
     // Ensure data fits completely inside the Xmm/Ymm/Zmm register
     if (store_size < 0 || store_size > 64)
-        IE_THROW() << "Store emitter in " << name_ << " has unexpected number of values to store in store_bytes.";
+        OPENVINO_THROW("Store emitter in ", name_, " has unexpected number of values to store in store_bytes.");
     if (is_ymm && store_size > 32)
-        IE_THROW() << "Store emitter in " << name_ << " has unexpected number of values to store to ymm in store_bytes.";
+        OPENVINO_THROW("Store emitter in ", name_, " has unexpected number of values to store to ymm in store_bytes.");
     if (is_xmm && store_size > 16)
-        IE_THROW() << "Store emitter in " << name_ << " has unexpected number of values to store to xmm in store_bytes.";
+        OPENVINO_THROW("Store emitter in ", name_, " has unexpected number of values to store to xmm in store_bytes.");
 
     auto xmm = Xbyak::Xmm(data_idx);
     auto ymm = Xbyak::Ymm(data_idx);
@@ -843,7 +882,7 @@ void jit_store_emitter::store_bytes(const Xbyak::Reg64 &reg, int offset, int sto
                 break;
             case 16: break;
             default:
-                IE_THROW() << "Store emitter in " << name_ << " has unexpected number of values to store in store_bytes.";
+                OPENVINO_THROW("Store emitter in ", name_, " has unexpected number of values to store in store_bytes.");
         }
     };
 
@@ -890,11 +929,17 @@ void jit_store_emitter::store_dword_to_byte_extension(const Xbyak::Reg64 &reg, i
     // At most 8 dwords can fit inside the Ymm register
     // At most 4 dwords can fit inside the Xmm register
     if (store_num < 0 || store_num > 16)
-        IE_THROW() << "Store emitter in " << name_ << " has unexpected number of values to store in store_dword_to_byte_extension.";
+        OPENVINO_THROW("Store emitter in ",
+                       name_,
+                       " has unexpected number of values to store in store_dword_to_byte_extension.");
     if (is_ymm && store_num > 8)
-        IE_THROW() << "Store emitter in " << name_ << " has unexpected number of values to store to ymm in store_dword_to_byte_extension.";
+        OPENVINO_THROW("Store emitter in ",
+                       name_,
+                       " has unexpected number of values to store to ymm in store_dword_to_byte_extension.");
     if (is_xmm && store_num > 4)
-        IE_THROW() << "Store emitter in " << name_ << " has unexpected number of values to store to xmm in store_dword_to_byte_extension.";
+        OPENVINO_THROW("Store emitter in ",
+                       name_,
+                       " has unexpected number of values to store to xmm in store_dword_to_byte_extension.");
 
     auto vmm = Vmm(data_idx);
     auto zmm = Xbyak::Zmm(data_idx);
@@ -1037,7 +1082,11 @@ void jit_store_emitter::store_dword_to_byte_extension(const Xbyak::Reg64 &reg, i
 */
 template <typename Vmm>
 void jit_store_emitter::store_dword_to_word_extension(const Xbyak::Reg64 &reg,
-    int offset, bool is_bf16, bool is_signed, int store_num) const {
+    int offset, ov::element::Type precision, int store_num) const {
+    const bool is_bf16 = (precision == ov::element::bf16);
+    const bool is_f16 = (precision == ov::element::f16);
+    const bool is_signed = precision.is_signed();
+
     constexpr bool is_xmm = std::is_same<Vmm, Xbyak::Xmm>::value;
     constexpr bool is_ymm = std::is_same<Vmm, Xbyak::Ymm>::value;
     constexpr bool is_zmm = std::is_same<Vmm, Xbyak::Zmm>::value;
@@ -1050,11 +1099,17 @@ void jit_store_emitter::store_dword_to_word_extension(const Xbyak::Reg64 &reg,
     // At most 4 dwords can fit inside the Xmm register
     // At most 8 dwords can fit inside the Ymm register
     if (store_num < 0 || store_num > 16)
-        IE_THROW() << "Store emitter in " << name_ << " has unexpected number of values to store in store_dword_to_word_extension.";
+        OPENVINO_THROW("Store emitter in ",
+                       name_,
+                       " has unexpected number of values to store in store_dword_to_word_extension.");
     if (is_ymm && store_num > 8)
-        IE_THROW() << "Store emitter in " << name_ << " has unexpected number of values to store to ymm in store_dword_to_word_extension.";
+        OPENVINO_THROW("Store emitter in ",
+                       name_,
+                       " has unexpected number of values to store to ymm in store_dword_to_word_extension.");
     if (is_xmm && store_num > 4)
-        IE_THROW() << "Store emitter in " << name_ << " has unexpected number of values to store to xmm in store_dword_to_word_extension.";
+        OPENVINO_THROW("Store emitter in ",
+                       name_,
+                       " has unexpected number of values to store to xmm in store_dword_to_word_extension.");
 
     auto xmm = Xbyak::Xmm(data_idx);
     auto ymm = Xbyak::Ymm(data_idx);
@@ -1105,7 +1160,7 @@ void jit_store_emitter::store_dword_to_word_extension(const Xbyak::Reg64 &reg,
     if (is_bf16) {
         if (mayiuse(cpu::x64::avx512_core)) {
             // to avoid src vmm pollution, this check means no precision convert happens, so data_idx is still original_data_idx.
-            if (src_prc_ == Precision::FP32) {
+            if (src_prc_ == ov::element::f32) {
                 ymm = Ymm(aux_vec_idxs[0]);
             }
             uni_vcvtneps2bf16_->emit_code({static_cast<size_t>(zmm.getIdx())}, {static_cast<size_t>(ymm.getIdx())});
@@ -1117,11 +1172,11 @@ void jit_store_emitter::store_dword_to_word_extension(const Xbyak::Reg64 &reg,
             }
         } else {
             // to avoid src vmm pollution
-            if (src_prc_ == Precision::FP32) {
+            if (src_prc_ == ov::element::f32) {
                 xmm = Xmm(aux_vec_idxs[0]);
             }
             // For sse41 mask register has to be Xmm(0) so we cannot use Xmm(0) as I/O vmm in uni_vcvtneps2bf16_
-            if (host_isa_ == cpu::x64::sse41 && src_prc_ == Precision::FP32) {
+            if (host_isa_ == cpu::x64::sse41 && src_prc_ == ov::element::f32) {
                 auto xmm_aux1 = Xmm(aux_vec_idxs[1]);
                 h->uni_vmovups(xmm_aux1, vmm);
                 uni_vcvtneps2bf16_->emit_code({static_cast<size_t>(vmm.getIdx())}, {static_cast<size_t>(vmm.getIdx())},
@@ -1133,6 +1188,22 @@ void jit_store_emitter::store_dword_to_word_extension(const Xbyak::Reg64 &reg,
             }
 
             data_idx = static_cast<int>(xmm.getIdx());
+            store_bytes<Vmm>(reg, offset, store_num * 2);
+        }
+    } else if (is_f16) {
+        if (!mayiuse(cpu::x64::avx512_core_fp16))
+            OPENVINO_THROW("Store emitter in ", name_, " only support fp16 on platform with avx512_core_fp16.");
+        // to avoid src vmm pollution
+        if (src_prc_ == ov::element::f32) {
+            // since avx512, zmm(fp32) => ymm(fp16)
+            ymm = Ymm(aux_vec_idxs[0]);
+        } // in I32 case, zmm&ymm is already in aux reg
+
+        h->vcvtps2ph(ymm, zmm, 0x4);
+        if (store_num == 16) {
+            h->vmovdqu16(ptr[reg + offset], ymm);
+        } else {
+            data_idx = static_cast<int>(ymm.getIdx());
             store_bytes<Vmm>(reg, offset, store_num * 2);
         }
     } else {

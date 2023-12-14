@@ -5,14 +5,8 @@
 add_subdirectory(cpp)
 add_subdirectory(c)
 
-# used by tests_deprecated
-if(TARGET format_reader)
-    install(TARGETS format_reader
-            ARCHIVE DESTINATION tests COMPONENT tests EXCLUDE_FROM_ALL
-            LIBRARY DESTINATION tests COMPONENT tests EXCLUDE_FROM_ALL)
-endif()
-
-openvino_developer_export_targets(COMPONENT openvino_common TARGETS format_reader ie_samples_utils)
+ov_developer_package_export_targets(TARGET format_reader)
+ov_developer_package_export_targets(TARGET ie_samples_utils)
 
 #
 # Install

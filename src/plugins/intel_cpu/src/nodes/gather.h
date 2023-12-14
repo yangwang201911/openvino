@@ -17,15 +17,17 @@ namespace node {
 
 class Gather : public Node {
 public:
-    Gather(const std::shared_ptr<ngraph::Node>& op, const GraphContext::CPtr context);
+    Gather(const std::shared_ptr<ov::Node>& op, const GraphContext::CPtr context);
 
     void getSupportedDescriptors() override {};
     void initSupportedPrimitiveDescriptors() override;
     void createPrimitive() override;
     void execute(dnnl::stream strm) override;
     bool created() const override;
+    bool isExecutable() const override;
+    void resolveInPlaceEdges(Edge::LOOK look) override;
 
-    static bool isSupportedOperation(const std::shared_ptr<const ngraph::Node>& op, std::string& errorMessage) noexcept;
+    static bool isSupportedOperation(const std::shared_ptr<const ov::Node>& op, std::string& errorMessage) noexcept;
 
     struct threadExecParams {
         std::vector<int> specIdxInBytes;
@@ -79,6 +81,7 @@ private:
     uint64_t totalWork = 0lu;
 
     std::vector<threadExecParams> execParamsPerThread;
+    std::vector<int> constIndices;
 
     static constexpr size_t GATHER_DATA = 0;
     static constexpr size_t GATHER_INDICES = 1;

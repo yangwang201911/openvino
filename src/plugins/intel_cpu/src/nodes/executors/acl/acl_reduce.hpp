@@ -30,7 +30,7 @@ public:
     }
 
 private:
-    std::function<void()> exec_func;
+    std::unique_ptr<arm_compute::IFunction> ifunc;
     ReduceAttrs reduceAttrs;
     impl_desc_type implType = impl_desc_type::acl;
 
@@ -46,8 +46,8 @@ public:
                      const std::vector<MemoryDescPtr>& dstDescs) const override {
         if (reduceAttrs.operation == Algorithm::ReduceMean) {
             if (srcDescs[0]->getPrecision() != dstDescs[0]->getPrecision() ||
-               (srcDescs[0]->getPrecision() != InferenceEngine::Precision::FP32 &&
-                srcDescs[0]->getPrecision() != InferenceEngine::Precision::FP16)) {
+               (srcDescs[0]->getPrecision() != ov::element::f32 &&
+                srcDescs[0]->getPrecision() != ov::element::f16)) {
                 DEBUG_LOG("NEReduceMean does not support precisions:",
                         " src[0]=", srcDescs[0]->getPrecision(),
                         " dst[0]=", dstDescs[0]->getPrecision());
@@ -55,9 +55,9 @@ public:
             }
         } else {
             if (srcDescs[0]->getPrecision() != dstDescs[0]->getPrecision() ||
-               (srcDescs[0]->getPrecision() != InferenceEngine::Precision::FP32 &&
-                srcDescs[0]->getPrecision() != InferenceEngine::Precision::FP16 &&
-                srcDescs[0]->getPrecision() != InferenceEngine::Precision::I32)) {
+               (srcDescs[0]->getPrecision() != ov::element::f32 &&
+                srcDescs[0]->getPrecision() != ov::element::f16 &&
+                srcDescs[0]->getPrecision() != ov::element::i32)) {
                 DEBUG_LOG("NEReductionOperation does not support precisions:",
                         " src[0]=", srcDescs[0]->getPrecision(),
                         " dst[0]=", dstDescs[0]->getPrecision());
@@ -74,7 +74,7 @@ public:
             for (size_t i = 0; i < reduceAttrs.axes.size(); ++i) {
                 auto axe = axisCast(reduceAttrs.axes[i], srcDescs[0]->getShape().getRank());
                 if (axe > 3) {
-                    DEBUG_LOG("ACL supports 3 or less axis for Reduce op");
+                    DEBUG_LOG("ACL supports tensor rank up to 4 for ReduceMean operation. Tensor rank: ", axe);
                     return false;
                 }
             }
@@ -84,6 +84,7 @@ public:
              reduceAttrs.operation == Algorithm::ReduceMin ||
              reduceAttrs.operation == Algorithm::ReduceProd) &&
              reduceAttrs.axes.size() != 1) {
+                DEBUG_LOG("ACL supports single axes reduce only. Number of axes: ", reduceAttrs.axes.size());
                 return false;
              }
 

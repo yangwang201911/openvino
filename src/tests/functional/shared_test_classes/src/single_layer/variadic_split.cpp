@@ -16,8 +16,8 @@ namespace LayerTestsDefinitions {
         std::string targetDevice;
         std::tie(numSplits, axis, netPrecision, inPrc, outPrc, inLayout, outLayout, inputShapes, targetDevice) = obj.param;
         std::ostringstream result;
-        result << "IS=" << CommonTestUtils::vec2str(inputShapes) << "_";
-        result << "numSplits=" << CommonTestUtils::vec2str(numSplits) << "_";
+        result << "IS=" << ov::test::utils::vec2str(inputShapes) << "_";
+        result << "numSplits=" << ov::test::utils::vec2str(numSplits) << "_";
         result << "axis=" << axis << "_";
         result << "IS";
         result << "netPRC=" << netPrecision.name() << "_";
@@ -35,14 +35,12 @@ namespace LayerTestsDefinitions {
         InferenceEngine::Precision netPrecision;
         std::tie(numSplits, axis, netPrecision, inPrc, outPrc, inLayout, outLayout, inputShape, targetDevice) = this->GetParam();
         auto ngPrc = FuncTestUtils::PrecisionUtils::convertIE2nGraphPrc(netPrecision);
-        auto params = ngraph::builder::makeParams(ngPrc, {inputShape});
-        auto paramOuts = ngraph::helpers::convert2OutputVector(
-                ngraph::helpers::castOps2Nodes<ngraph::opset3::Parameter>(params));
-        auto VariadicSplit = std::dynamic_pointer_cast<ngraph::opset3::VariadicSplit>(ngraph::builder::makeVariadicSplit(params[0], numSplits,
+        ov::ParameterVector params{std::make_shared<ov::op::v0::Parameter>(ngPrc, ov::Shape(inputShape))};
+        auto VariadicSplit = std::dynamic_pointer_cast<ov::op::v1::VariadicSplit>(ngraph::builder::makeVariadicSplit(params[0], numSplits,
                 axis));
         ngraph::ResultVector results;
         for (int i = 0; i < numSplits.size(); i++) {
-            results.push_back(std::make_shared<ngraph::opset3::Result>(VariadicSplit->output(i)));
+            results.push_back(std::make_shared<ov::op::v0::Result>(VariadicSplit->output(i)));
         }
         function = std::make_shared<ngraph::Function>(results, params, "VariadicSplit");
     }

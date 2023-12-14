@@ -17,6 +17,14 @@ function(create_target_per_test_for_directory TEST_DIR TARGET_PREFIX)
     ${CMAKE_CURRENT_SOURCE_DIR}/test_utils/fusing_test_utils.cpp
   )
 
+if(X86_64)
+    list(APPEND REQUIRED_OBJECT_FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_utils/x64/filter_cpu_info.cpp)
+elseif(ARM OR AARCH64)
+    list(APPEND REQUIRED_OBJECT_FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_utils/arm/filter_cpu_info.cpp)
+endif()
+
   file(GLOB LIST_OF_TEST_FILES ${TEST_DIR}/*.cpp)
   # create targed for each test file in directory
   foreach(TEST_FILE ${LIST_OF_TEST_FILES})
@@ -25,7 +33,7 @@ function(create_target_per_test_for_directory TEST_DIR TARGET_PREFIX)
     set(TEST_TARGET_NAME ${TARGET_PREFIX}_${TEST_FILE_WE})
 
     # create target
-    addIeTargetTest(
+    ov_add_test_target(
       NAME ${TEST_TARGET_NAME}
       ROOT ${TEST_DIR}
       INCLUDES ${INCLUDES}
@@ -35,11 +43,10 @@ function(create_target_per_test_for_directory TEST_DIR TARGET_PREFIX)
       DEPENDENCIES ${DEPENDENCIES}
       LINK_LIBRARIES ${LINK_LIBRARIES}
       ADD_CPPLINT
-      LABELS
-      CPU
+      LABELS OV CPU
     )
 
-    set_ie_threading_interface_for(${TEST_TARGET_NAME})
+    ov_set_threading_interface_for(${TEST_TARGET_NAME})
     # avoid building binaries for every test in case target 'all' is used
     set_target_properties(${TEST_TARGET_NAME} PROPERTIES
       EXCLUDE_FROM_ALL ON)
@@ -59,13 +66,13 @@ function(create_target_per_test_for_directory TEST_DIR TARGET_PREFIX)
         file(GLOB_RECURSE LIST_OF_TEST_ARCH_INSTANCES ${TEST_DIR}/instances/arm/${TEST_CLASS_FILE_NAME})
     endif()
     file(GLOB_RECURSE LIST_OF_TEST_COMMON_INSTANCES ${TEST_DIR}/instances/common/${TEST_CLASS_FILE_NAME})
-    list(APPEND LIST_OF_TEST_INSTANCES ${LIST_OF_TEST_COMMON_INSTANCES} ${LIST_OF_TEST_ARCH_INSTANCES})
+    set(LIST_OF_TEST_INSTANCES ${LIST_OF_TEST_COMMON_INSTANCES} ${LIST_OF_TEST_ARCH_INSTANCES})
 
     set(TEST_INSTANCES "${LIST_OF_TEST_INSTANCES}")
     set(TEST_TARGET_NAME ${TARGET_PREFIX}_${TEST_CLASS})
 
     # create target
-    addIeTargetTest(
+    ov_add_test_target(
       NAME ${TEST_TARGET_NAME}
       ROOT ${TEST_DIR}
       INCLUDES ${INCLUDES}
@@ -74,12 +81,10 @@ function(create_target_per_test_for_directory TEST_DIR TARGET_PREFIX)
       DEFINES ${DEFINES}
       DEPENDENCIES ${DEPENDENCIES}
       LINK_LIBRARIES ${LINK_LIBRARIES}
-      ADD_CPPLINT
-      LABELS
-      CPU
+      LABELS OV CPU
     )
 
-    set_ie_threading_interface_for(${TEST_TARGET_NAME})
+    ov_set_threading_interface_for(${TEST_TARGET_NAME})
     # avoid building binaries for every test in case target 'all' is used
     set_target_properties(${TEST_TARGET_NAME} PROPERTIES
       EXCLUDE_FROM_ALL ON)

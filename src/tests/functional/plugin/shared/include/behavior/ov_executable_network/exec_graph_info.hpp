@@ -8,11 +8,12 @@
 #include <openvino/pass/serialize.hpp>
 #include <ie_ngraph_utils.hpp>
 #include "base/ov_behavior_test_utils.hpp"
-#include "common_test_utils/ngraph_test_utils.hpp"
+#include "common_test_utils/ov_test_utils.hpp"
 #include "common_test_utils/common_utils.hpp"
 #include "common_test_utils/file_utils.hpp"
 
 #include "functional_test_utils/plugin_cache.hpp"
+#include "common_test_utils/subgraph_builders/multiple_input_outpput_double_concat.hpp"
 
 namespace ov {
 namespace test {
@@ -70,13 +71,13 @@ class OVExecGraphImportExportTest : public testing::WithParamInterface<OVExecGra
 };
 
 TEST_P(OVExecGraphImportExportTest, importExportedFunction) {
-    if (target_device == CommonTestUtils::DEVICE_MULTI || target_device == CommonTestUtils::DEVICE_AUTO) {
+    if (target_device == ov::test::utils::DEVICE_MULTI || target_device == ov::test::utils::DEVICE_AUTO) {
         GTEST_SKIP() << "MULTI / AUTO does not support import / export" << std::endl;
     }
 
     ov::CompiledModel execNet;
     // Create simple function
-    function = ngraph::builder::subgraph::makeMultipleInputOutputDoubleConcat({1, 2, 24, 24}, elementType);
+    function = ov::test::utils::make_multiple_input_output_double_concat({1, 2, 24, 24}, elementType);
     execNet = core->compile_model(function, target_device, configuration);
 
     std::stringstream strm;
@@ -132,16 +133,16 @@ TEST_P(OVExecGraphImportExportTest, importExportedFunction) {
 }
 
 TEST_P(OVExecGraphImportExportTest, importExportedFunctionParameterResultOnly) {
-    if (target_device == CommonTestUtils::DEVICE_MULTI || target_device == CommonTestUtils::DEVICE_AUTO) {
+    if (target_device == ov::test::utils::DEVICE_MULTI || target_device == ov::test::utils::DEVICE_AUTO) {
         GTEST_SKIP() << "MULTI / AUTO does not support import / export" << std::endl;
     }
 
     // Create a simple function
     {
-        auto param = std::make_shared<ov::opset8::Parameter>(elementType, ngraph::Shape({1, 3, 24, 24}));
+        auto param = std::make_shared<ov::op::v0::Parameter>(elementType, ngraph::Shape({1, 3, 24, 24}));
         param->set_friendly_name("param");
         param->output(0).get_tensor().set_names({"data"});
-        auto result = std::make_shared<ov::opset8::Result>(param);
+        auto result = std::make_shared<ov::op::v0::Result>(param);
         result->set_friendly_name("result");
         function = std::make_shared<ngraph::Function>(ngraph::ResultVector{result},
                                                       ngraph::ParameterVector{param});
@@ -172,16 +173,16 @@ TEST_P(OVExecGraphImportExportTest, importExportedFunctionParameterResultOnly) {
 }
 
 TEST_P(OVExecGraphImportExportTest, importExportedFunctionConstantResultOnly) {
-    if (target_device == CommonTestUtils::DEVICE_MULTI || target_device == CommonTestUtils::DEVICE_AUTO) {
+    if (target_device == ov::test::utils::DEVICE_MULTI || target_device == ov::test::utils::DEVICE_AUTO) {
         GTEST_SKIP() << "MULTI / AUTO does not support import / export" << std::endl;
     }
 
     // Create a simple function
     {
-        auto constant = std::make_shared<ov::opset8::Constant>(elementType, ngraph::Shape({1, 3, 24, 24}));
+        auto constant = std::make_shared<ov::op::v0::Constant>(elementType, ngraph::Shape({1, 3, 24, 24}));
         constant->set_friendly_name("constant");
         constant->output(0).get_tensor().set_names({"data"});
-        auto result = std::make_shared<ov::opset8::Result>(constant);
+        auto result = std::make_shared<ov::op::v0::Result>(constant);
         result->set_friendly_name("result");
         function = std::make_shared<ngraph::Function>(ngraph::ResultVector{result},
                                                       ngraph::ParameterVector{});
@@ -292,7 +293,7 @@ TEST_P(OVExecGraphImportExportTest, readFromV10IR) {
     EXPECT_NO_THROW(execNet.input("in2"));
     EXPECT_NO_THROW(execNet.output("concat"));
 
-    if (target_device == CommonTestUtils::DEVICE_MULTI || target_device == CommonTestUtils::DEVICE_AUTO) {
+    if (target_device == ov::test::utils::DEVICE_MULTI || target_device == ov::test::utils::DEVICE_AUTO) {
         GTEST_SKIP() << "MULTI / AUTO does not support import / export" << std::endl;
     }
 
@@ -329,7 +330,7 @@ static std::map<std::string, std::string> any_copy(const ov::AnyMap& params) {
 }
 
 TEST_P(OVExecGraphImportExportTest, importExportedIENetwork) {
-    if (target_device == CommonTestUtils::DEVICE_MULTI || target_device == CommonTestUtils::DEVICE_AUTO) {
+    if (target_device == ov::test::utils::DEVICE_MULTI || target_device == ov::test::utils::DEVICE_AUTO) {
         GTEST_SKIP() << "MULTI / AUTO does not support import / export" << std::endl;
     }
 
@@ -337,7 +338,7 @@ TEST_P(OVExecGraphImportExportTest, importExportedIENetwork) {
     InferenceEngine::ExecutableNetwork execNet;
 
     // Create simple function
-    function = ngraph::builder::subgraph::makeMultipleInputOutputDoubleConcat({1, 2, 24, 24}, elementType);
+    function = ov::test::utils::make_multiple_input_output_double_concat({1, 2, 24, 24}, elementType);
 
     execNet = ie->LoadNetwork(InferenceEngine::CNNNetwork(function), target_device, any_copy(configuration));
 
@@ -375,7 +376,7 @@ TEST_P(OVExecGraphImportExportTest, importExportedIENetwork) {
 }
 
 TEST_P(OVExecGraphImportExportTest, importExportedIENetworkParameterResultOnly) {
-    if (target_device == CommonTestUtils::DEVICE_MULTI || target_device == CommonTestUtils::DEVICE_AUTO) {
+    if (target_device == ov::test::utils::DEVICE_MULTI || target_device == ov::test::utils::DEVICE_AUTO) {
         GTEST_SKIP() << "MULTI / AUTO does not support import / export" << std::endl;
     }
 
@@ -385,10 +386,10 @@ TEST_P(OVExecGraphImportExportTest, importExportedIENetworkParameterResultOnly) 
 
     // Create a simple function
     {
-        auto param = std::make_shared<ov::opset8::Parameter>(elementType, ngraph::Shape({1, 3, 24, 24}));
+        auto param = std::make_shared<ov::op::v0::Parameter>(elementType, ngraph::Shape({1, 3, 24, 24}));
         param->set_friendly_name("param");
         param->output(0).get_tensor().set_names({"data"});
-        auto result = std::make_shared<ov::opset8::Result>(param);
+        auto result = std::make_shared<ov::op::v0::Result>(param);
         result->set_friendly_name("result");
         function = std::make_shared<ngraph::Function>(ngraph::ResultVector{result}, ngraph::ParameterVector{param});
         function->set_friendly_name("ParamResult");
@@ -418,7 +419,7 @@ TEST_P(OVExecGraphImportExportTest, importExportedIENetworkParameterResultOnly) 
 }
 
 TEST_P(OVExecGraphImportExportTest, importExportedIENetworkConstantResultOnly) {
-    if (target_device == CommonTestUtils::DEVICE_MULTI || target_device == CommonTestUtils::DEVICE_AUTO) {
+    if (target_device == ov::test::utils::DEVICE_MULTI || target_device == ov::test::utils::DEVICE_AUTO) {
         GTEST_SKIP() << "MULTI / AUTO does not support import / export" << std::endl;
     }
 
@@ -427,10 +428,10 @@ TEST_P(OVExecGraphImportExportTest, importExportedIENetworkConstantResultOnly) {
 
     // Create a simple function
     {
-        auto constant = std::make_shared<ov::opset8::Constant>(elementType, ngraph::Shape({1, 3, 24, 24}));
+        auto constant = std::make_shared<ov::op::v0::Constant>(elementType, ngraph::Shape({1, 3, 24, 24}));
         constant->set_friendly_name("constant");
         constant->output(0).get_tensor().set_names({"data"});
-        auto result = std::make_shared<ov::opset8::Result>(constant);
+        auto result = std::make_shared<ov::op::v0::Result>(constant);
         result->set_friendly_name("result");
         function = std::make_shared<ngraph::Function>(ngraph::ResultVector{result},
                                                       ngraph::ParameterVector{});
@@ -463,7 +464,7 @@ TEST_P(OVExecGraphImportExportTest, importExportedIENetworkConstantResultOnly) {
 }
 
 TEST_P(OVExecGraphImportExportTest, ieImportExportedFunction) {
-    if (target_device == CommonTestUtils::DEVICE_MULTI || target_device == CommonTestUtils::DEVICE_AUTO) {
+    if (target_device == ov::test::utils::DEVICE_MULTI || target_device == ov::test::utils::DEVICE_AUTO) {
         GTEST_SKIP() << "MULTI / AUTO does not support import / export" << std::endl;
     }
 
@@ -471,7 +472,7 @@ TEST_P(OVExecGraphImportExportTest, ieImportExportedFunction) {
     ov::CompiledModel execNet;
 
     // Create simple function
-    function = ngraph::builder::subgraph::makeMultipleInputOutputDoubleConcat({1, 2, 24, 24}, elementType);
+    function = ov::test::utils::make_multiple_input_output_double_concat({1, 2, 24, 24}, elementType);
     execNet = core->compile_model(function, target_device, configuration);
 
     std::stringstream strm;

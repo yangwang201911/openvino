@@ -4,7 +4,7 @@
 
 #include "space_to_batch.h"
 
-#include "ie_parallel.hpp"
+#include "openvino/core/parallel.hpp"
 #include <openvino/op/space_to_batch.hpp>
 
 using namespace InferenceEngine;
@@ -30,20 +30,20 @@ SpaceToBatch::SpaceToBatch(const std::shared_ptr<ov::Node>& op, const GraphConte
     : Node(op, context, NgraphShapeInferFactory(op, PortMask(1, 2, 3))) {
     std::string errorMessage;
     if (!isSupportedOperation(op, errorMessage)) {
-        IE_THROW(NotImplemented) << errorMessage;
+        OPENVINO_THROW_NOT_IMPLEMENTED(errorMessage);
     }
 
     errorPrefix = "BatchToSpace layer with name '" + op->get_friendly_name() + "'";
 
     if (inputShapes.size() != 4 || outputShapes.size() != 1)
-        IE_THROW() << errorPrefix << " has incorrect number of input or output edges!";
+        OPENVINO_THROW(errorPrefix, " has incorrect number of input or output edges!");
 
     const size_t srcRank = getInputShapeAtPort(0).getRank();
     const size_t dstRank = getOutputShapeAtPort(0).getRank();
     if (srcRank < 4 || srcRank > 5)
-        IE_THROW() << errorPrefix << " has unsupported 'data' input rank: " << srcRank;
+        OPENVINO_THROW(errorPrefix, " has unsupported 'data' input rank: ", srcRank);
     if (srcRank != dstRank)
-        IE_THROW() << errorPrefix << " has incorrect number of input/output dimensions";
+        OPENVINO_THROW(errorPrefix, " has incorrect number of input/output dimensions");
 }
 
 void SpaceToBatch::initSupportedPrimitiveDescriptors() {
@@ -54,33 +54,33 @@ void SpaceToBatch::initSupportedPrimitiveDescriptors() {
     const auto precision = getOriginalInputPrecisionAtPort(0);
     const std::set<size_t> supported_precision_sizes = {1, 2, 4, 8};
     if (supported_precision_sizes.find(precision.size()) == supported_precision_sizes.end())
-        IE_THROW() << errorPrefix << " has unsupported precision: " << precision.name();
+        OPENVINO_THROW(errorPrefix, " has unsupported precision: ", precision.get_type_name());
 
     addSupportedPrimDesc({{LayoutType::nspc, precision},
-                          {LayoutType::ncsp, Precision::I32},
-                          {LayoutType::ncsp, Precision::I32},
-                          {LayoutType::ncsp, Precision::I32}},
+                          {LayoutType::ncsp, ov::element::i32},
+                          {LayoutType::ncsp, ov::element::i32},
+                          {LayoutType::ncsp, ov::element::i32}},
                          {{LayoutType::nspc, precision}},
                          impl_desc_type::ref_any);
     addSupportedPrimDesc({{LayoutType::ncsp, precision},
-                          {LayoutType::ncsp, Precision::I32},
-                          {LayoutType::ncsp, Precision::I32},
-                          {LayoutType::ncsp, Precision::I32}},
+                          {LayoutType::ncsp, ov::element::i32},
+                          {LayoutType::ncsp, ov::element::i32},
+                          {LayoutType::ncsp, ov::element::i32}},
                          {{LayoutType::ncsp, precision}},
                          impl_desc_type::ref_any);
     if (inDims[1] != Shape::UNDEFINED_DIM && inDims[1] % 8 == 0) {
         addSupportedPrimDesc({{LayoutType::nCsp8c, precision},
-                              {LayoutType::ncsp, Precision::I32},
-                              {LayoutType::ncsp, Precision::I32},
-                              {LayoutType::ncsp, Precision::I32}},
+                              {LayoutType::ncsp, ov::element::i32},
+                              {LayoutType::ncsp, ov::element::i32},
+                              {LayoutType::ncsp, ov::element::i32}},
                              {{LayoutType::nCsp8c, precision}},
                              impl_desc_type::ref_any);
     }
     if (inDims[1] != Shape::UNDEFINED_DIM && inDims[1] % 16 == 0) {
         addSupportedPrimDesc({{LayoutType::nCsp16c, precision},
-                              {LayoutType::ncsp, Precision::I32},
-                              {LayoutType::ncsp, Precision::I32},
-                              {LayoutType::ncsp, Precision::I32}},
+                              {LayoutType::ncsp, ov::element::i32},
+                              {LayoutType::ncsp, ov::element::i32},
+                              {LayoutType::ncsp, ov::element::i32}},
                              {{LayoutType::nCsp16c, precision}},
                              impl_desc_type::ref_any);
     }
@@ -101,24 +101,24 @@ void SpaceToBatch::SpaceToBatchKernel() {
     const auto& srcMem = getParentEdgesAtPort(0)[0]->getMemoryPtr();
     const auto& dstMem = getChildEdgesAtPort(0)[0]->getMemoryPtr();
 
-    const auto *blockShapesPtr = reinterpret_cast<int *>(getParentEdgeAt(1)->getMemoryPtr()->GetPtr());
-    size_t dataRank = srcMem->GetShape().getRank();
+    const auto *blockShapesPtr = reinterpret_cast<int *>(getParentEdgeAt(1)->getMemoryPtr()->getData());
+    size_t dataRank = srcMem->getShape().getRank();
     blockShapeIn.clear();
     for (size_t i = 0; i < dataRank; i++) {
         blockShapeIn.push_back(*(blockShapesPtr + i));
     }
 
-    const auto *padsBeginPtr = reinterpret_cast<int *>(getParentEdgeAt(2)->getMemoryPtr()->GetPtr());
+    const auto *padsBeginPtr = reinterpret_cast<int *>(getParentEdgeAt(2)->getMemoryPtr()->getData());
     padsBeginIn.clear();
     for (size_t i = 0; i < dataRank; i++) {
         padsBeginIn.push_back(*(padsBeginPtr + i));
     }
 
-    const auto *srcData = reinterpret_cast<const T *>(srcMem->GetPtr());
-    auto *dstData = reinterpret_cast<T *>(dstMem->GetPtr());
+    const auto *srcData = reinterpret_cast<const T *>(srcMem->getData());
+    auto *dstData = reinterpret_cast<T *>(dstMem->getData());
 
-    const int64_t srcLen = srcMem->GetSize() / sizeof(T);
-    const int64_t dstLen = dstMem->GetSize() / sizeof(T);
+    const int64_t srcLen = srcMem->getSize() / sizeof(T);
+    const int64_t dstLen = dstMem->getSize() / sizeof(T);
 
     const auto &inDims = srcMem->getStaticDims();
     const auto &outDims = dstMem->getStaticDims();
@@ -140,10 +140,10 @@ void SpaceToBatch::SpaceToBatchKernel() {
         blockShape.erase(blockShape.begin() + 1);
     }
 
-    const auto outBlkDims = dstMem->GetDescWithType<BlockedMemoryDesc>()->getBlockDims();
+    const auto outBlkDims = dstMem->getDescWithType<BlockedMemoryDesc>()->getBlockDims();
     const int64_t blockSize = blocked ? outBlkDims.back() : 1lu;
     const int64_t blockCountInput = outBlkDims[1];
-    const int64_t blockCountOutput = srcMem->GetDescWithType<BlockedMemoryDesc>()->getBlockDims()[1];
+    const int64_t blockCountOutput = srcMem->getDescWithType<BlockedMemoryDesc>()->getBlockDims()[1];
     const int64_t blockRemainder = inShape5D[1] % blockSize;
     const int64_t lastBlock = blockRemainder == 0 ? blockSize : blockRemainder;
 
@@ -153,7 +153,7 @@ void SpaceToBatch::SpaceToBatchKernel() {
     const int64_t outSpatialStep = outShape5D[2] * outShape5D[3] * outShape5D[4];
     const int64_t outBatchStep = (blocked ? blockSize * blockCountOutput : outShape5D[1]) * outSpatialStep;
 
-    memset(dstData, 0, dstMem->GetSize());
+    memset(dstData, 0, dstMem->getSize());
 
     int64_t channels = (inShape5D[1] / blockSize);
     channels = channels == 0 ? 1 : channels;
@@ -245,12 +245,18 @@ void SpaceToBatch::executeDynamicImpl(dnnl::stream strm) {
 
 void SpaceToBatch::execute(dnnl::stream strm) {
     switch (getParentEdgeAt(0)->getMemory().getDesc().getPrecision().size()) {
-        case 1: SpaceToBatchKernel<PrecisionTrait<Precision::U8>::value_type>();  break;
-        case 2: SpaceToBatchKernel<PrecisionTrait<Precision::U16>::value_type>(); break;
-        case 4: SpaceToBatchKernel<PrecisionTrait<Precision::I32>::value_type>(); break;
-        default:
-            IE_THROW() << "SpaceToBatch layer does not support precision '" + std::string(getParentEdgeAt(0)->getMemory().getDesc().getPrecision().name())
-                          + "'";
+    case 1:
+        SpaceToBatchKernel<element_type_traits<ov::element::u8>::value_type>();
+        break;
+    case 2:
+        SpaceToBatchKernel<element_type_traits<ov::element::u16>::value_type>();
+        break;
+    case 4:
+        SpaceToBatchKernel<element_type_traits<ov::element::i32>::value_type>();
+        break;
+    default:
+        OPENVINO_THROW("SpaceToBatch layer does not support precision '" +
+                           std::string(getParentEdgeAt(0)->getMemory().getDesc().getPrecision().get_type_name()) + "'");
     }
 }
 

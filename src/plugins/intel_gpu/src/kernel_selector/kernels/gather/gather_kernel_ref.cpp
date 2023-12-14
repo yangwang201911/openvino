@@ -105,7 +105,7 @@ static inline Tensor::Dim GetGatherIndexDim(const gather_params& params) {
     case GatherAxis::X:
         return params.inputs[0].X();
     default:
-        IE_THROW() << "Unknown gather axis=" << static_cast<int>(params.axis);
+        OPENVINO_THROW("Unknown gather axis=", static_cast<int>(params.axis));
     }
 }
 
@@ -124,7 +124,7 @@ static inline int64_t GetGatherAxisIndexInShapeInfo(const gather_params& params)
     case GatherAxis::X:
         return 7;
     default:
-        IE_THROW() << "Unknown gather axis=" << static_cast<int>(params.axis);
+        OPENVINO_THROW("Unknown gather axis=", static_cast<int>(params.axis));
     }
 }
 
@@ -224,7 +224,7 @@ CommonDispatchData GatherKernelRef::SetDefault(const gather_params& params) cons
                        {Tensor::DataChannelName::Z, Tensor::DataChannelName::W},
                        {Tensor::DataChannelName::FEATURE, Tensor::DataChannelName::BATCH}};
     } else {
-        IE_THROW() << "Unknown rank: rank=" << rank;
+        OPENVINO_THROW("Unknown rank: rank=", rank);
     }
 
     dispatchData.lws =
@@ -293,6 +293,17 @@ bool GatherKernelRef::Validate(const Params& p, const optional_params& o) const 
     return true;
 }
 
+void GatherKernelRef::GetUpdateDispatchDataFunc(KernelData& kd) const {
+    kd.update_dispatch_data_func = [this](const Params& params, KernelData& kd) {
+        const auto& prim_params = static_cast<const gather_params&>(params);
+        auto dispatchData = SetDefault(prim_params);
+        OPENVINO_ASSERT(kd.kernels.size() == 1, "[GPU] Invalid kernels size for update dispatch data func");
+        kd.kernels[0].params.workGroups.global = dispatchData.gws;
+        kd.kernels[0].params.workGroups.local = dispatchData.lws;
+        kd.kernels[0].skip_execution = KernelData::SkipKernelExecution(prim_params);
+    };
+}
+
 KernelsData GatherKernelRef::GetKernelsData(const Params& params, const optional_params& options) const {
     if (!Validate(params, options)) {
         return {};
@@ -308,14 +319,7 @@ KernelsData GatherKernelRef::GetKernelsData(const Params& params, const optional
 
     auto& kernel = kd.kernels[0];
 
-    kd.update_dispatch_data_func = [this](const Params& params, KernelData& kd) {
-        const auto& prim_params = static_cast<const gather_params&>(params);
-        auto dispatchData = SetDefault(prim_params);
-        OPENVINO_ASSERT(kd.kernels.size() == 1, "[GPU] Invalid kernels size for update dispatch data func");
-        kd.kernels[0].params.workGroups.global = dispatchData.gws;
-        kd.kernels[0].params.workGroups.local = dispatchData.lws;
-        kd.kernels[0].skip_execution = KernelData::SkipKernelExecution(prim_params);
-    };
+    GetUpdateDispatchDataFunc(kd);
 
     FillCLKernelData(kernel,
                      dispatchData,

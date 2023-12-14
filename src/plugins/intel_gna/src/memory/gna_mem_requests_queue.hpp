@@ -16,7 +16,7 @@
 #include "gna_lib_ver_selector.hpp"
 #include "gna_mem_requests.hpp"
 #include "log/log.hpp"
-#include "memory_solver.hpp"
+#include "openvino/runtime/memory_solver.hpp"
 
 using namespace ov::intel_gna;
 
@@ -199,7 +199,7 @@ public:
         auto size = getSize();
         if (ptr >= ptrBegin && ptr < ptrBegin + size) {
             auto curOffset = static_cast<uint8_t*>(ptr) - ptrBegin;
-            return {true, curOffset};
+            return {true, static_cast<uint32_t>(curOffset)};
         }
         return {false, 0};
     }
@@ -239,7 +239,7 @@ public:
     size_t calcSize(bool isCompact = false) override {
         if (isCompact) {
             _size = 0;
-            std::vector<MemorySolver::Box> boxes;
+            std::vector<ov::MemorySolver::Box> boxes;
             for (size_t i = 0; i < _mem_requests.size(); ++i) {
                 // skipping BIND, cross-region and empty requests
                 if (_mem_requests[i]._type & REQUEST_BIND || _mem_requests[i]._ptr_out == nullptr) {
@@ -255,12 +255,12 @@ public:
                 boxes.push_back({start, stop, static_cast<int64_t>(original_with_pad), static_cast<int64_t>(i)});
             }
 
-            MemorySolver memSolver(boxes);
+            ov::MemorySolver memSolver(boxes);
             _size = memSolver.solve();
 
             // setting offsets
             for (auto const& box : boxes) {
-                _mem_requests[box.id]._offset = memSolver.getOffset(box.id);
+                _mem_requests[box.id]._offset = memSolver.get_offset(static_cast<int>(box.id));
             }
             return _size;
         } else {

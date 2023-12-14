@@ -29,7 +29,7 @@ static inline kernel_selector::argm_axis GetArgMaxMinAxis(int64_t axis, size_t r
             else
                 return kernel_selector::argm_axis::X;
         case 4: return kernel_selector::argm_axis::X;
-        default: IE_THROW() << "Invalid arg_max_min axis " << axis;
+        default: OPENVINO_THROW("Invalid arg_max_min axis ", axis);
     }
 }
 
@@ -39,10 +39,19 @@ struct arg_max_min_impl : typed_primitive_impl_ocl<arg_max_min> {
     using kernel_selector_t = kernel_selector::arg_max_min_kernel_selector;
     using kernel_params_t = std::pair<kernel_selector::arg_max_min_params, kernel_selector::arg_max_min_optional_params>;
 
-    DECLARE_OBJECT_TYPE_SERIALIZATION
+    DECLARE_OBJECT_TYPE_SERIALIZATION(cldnn::ocl::arg_max_min_impl)
 
     std::unique_ptr<primitive_impl> clone() const override {
         return make_unique<arg_max_min_impl>(*this);
+    }
+
+    void load(BinaryInputBuffer& ib) override {
+        parent::load(ib);
+        if (is_dynamic()) {
+            auto& kernel_selector = kernel_selector_t::Instance();
+            auto kernel_impl = kernel_selector.GetImplementation(_kernel_data.kernelName);
+            kernel_impl->GetUpdateDispatchDataFunc(_kernel_data);
+        }
     }
 
 protected:
@@ -66,6 +75,7 @@ public:
         const auto& mode = primitive->mode;
         const auto& sort_type = primitive->sort;
         const auto& values_first = primitive->values_first;
+        const auto& stable = primitive->stable;
         const auto& outputs_num = primitive->input_size() == 3 ? 2 : static_cast<uint32_t>(primitive->output_size());
 
         auto argm_params = get_default_params<kernel_selector::arg_max_min_params>(impl_param, is_shape_agnostic);
@@ -107,6 +117,7 @@ public:
         }
 
         argm_params.values_first = values_first;
+        argm_params.stable = stable;
 
         return {argm_params, argm_optional_params};
     }

@@ -7,8 +7,9 @@
 #include <tuple>
 #include <vector>
 
-#include "ngraph_functions/builders.hpp"
-#include "ngraph_functions/utils/ngraph_helpers.hpp"
+#include "openvino/opsets/opset8.hpp"
+#include "ov_models/builders.hpp"
+#include "ov_models/utils/ov_helpers.hpp"
 #include "shared_test_classes/base/layer_test_utils.hpp"
 
 namespace SubgraphTestsDefinitions {
@@ -54,24 +55,24 @@ protected:
         configuration.insert(config.begin(), config.end());
 
         auto ngPrc = FuncTestUtils::PrecisionUtils::convertIE2nGraphPrc(netPrecision);
-        auto params = ngraph::builder::makeParams(ngPrc, {inputShape});
-        auto relu = std::make_shared<ngraph::opset8::Relu>(params[0]);
-        auto fq1 = std::make_shared<ngraph::opset8::FakeQuantize>(
-            relu,
-            ngraph::opset8::Constant::create(ngraph::element::f32, {1}, {-10.}),
-            ngraph::opset8::Constant::create(ngraph::element::f32, {1}, {10.}),
-            ngraph::opset8::Constant::create(ngraph::element::f32, {1}, {-10.}),
-            ngraph::opset8::Constant::create(ngraph::element::f32, {1}, {10.}),
-            static_cast<uint32_t>(std::numeric_limits<uint16_t>::max()) + 1);
+        ov::ParameterVector params{std::make_shared<ov::op::v0::Parameter>(ngPrc, ov::Shape(inputShape))};
+        auto relu = std::make_shared<ov::opset8::Relu>(params[0]);
+        auto fq1 =
+            std::make_shared<ov::opset8::FakeQuantize>(relu,
+                                                       ov::op::v0::Constant::create(ngraph::element::f32, {1}, {-10.}),
+                                                       ov::op::v0::Constant::create(ngraph::element::f32, {1}, {10.}),
+                                                       ov::op::v0::Constant::create(ngraph::element::f32, {1}, {-10.}),
+                                                       ov::op::v0::Constant::create(ngraph::element::f32, {1}, {10.}),
+                                                       static_cast<uint32_t>(std::numeric_limits<uint16_t>::max()) + 1);
         auto constant = ngraph::builder::makeConstant(ngPrc, constantShape, std::vector<float>{}, true);
-        auto fq2 = std::make_shared<ngraph::opset8::FakeQuantize>(
-            constant,
-            ngraph::opset8::Constant::create(ngraph::element::f32, {1}, {-10}),
-            ngraph::opset8::Constant::create(ngraph::element::f32, {1}, {10.}),
-            ngraph::opset8::Constant::create(ngraph::element::f32, {1}, {-10.}),
-            ngraph::opset8::Constant::create(ngraph::element::f32, {1}, {10.}),
-            static_cast<uint32_t>(std::numeric_limits<uint16_t>::max()) + 1);
-        auto concat = ngraph::builder::makeConcat({fq1, fq2}, 1);
+        auto fq2 =
+            std::make_shared<ov::opset8::FakeQuantize>(constant,
+                                                       ov::op::v0::Constant::create(ngraph::element::f32, {1}, {-10}),
+                                                       ov::op::v0::Constant::create(ngraph::element::f32, {1}, {10.}),
+                                                       ov::op::v0::Constant::create(ngraph::element::f32, {1}, {-10.}),
+                                                       ov::op::v0::Constant::create(ngraph::element::f32, {1}, {10.}),
+                                                       static_cast<uint32_t>(std::numeric_limits<uint16_t>::max()) + 1);
+        auto concat = std::make_shared<ov::op::v0::Concat>(ov::NodeVector{fq1, fq2}, 1);
         function = std::make_shared<ngraph::Function>(concat, params, "WeighableLayerWithoutFq");
     }
 };  // class WeighableLayerWithoutFqTest
@@ -98,7 +99,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_WeighableLayerWithoutFqTest,
                          ::testing::Combine(::testing::ValuesIn(netPrecisions),
                                             ::testing::ValuesIn(inputShapes),
                                             ::testing::ValuesIn(constantShapes),
-                                            ::testing::Values(CommonTestUtils::DEVICE_GNA),
+                                            ::testing::Values(ov::test::utils::DEVICE_GNA),
                                             ::testing::ValuesIn(configs)),
                          WeighableLayerWithoutFqTest::getTestCaseName);
 }  // namespace

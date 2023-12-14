@@ -18,17 +18,17 @@ namespace node {
 
 class MatMul : public Node {
 public:
-    MatMul(const std::shared_ptr<ngraph::Node>& op, const GraphContext::CPtr context);
+    MatMul(const std::shared_ptr<ov::Node>& op, const GraphContext::CPtr context);
 
     void getSupportedDescriptors() override;
     void createDescriptor(const std::vector<MemoryDescPtr>& inputDesc,
                           const std::vector<MemoryDescPtr>& outputDesc) override;
     void initSupportedPrimitiveDescriptors() override;
-    MemoryDescPtr getSrcMemDesc(dnnl::primitive_desc_iterator &primitive_desc_it, size_t idx) override;
+    MemoryDescPtr getSrcMemDesc(const dnnl::primitive_desc &prim_desc, size_t idx) const override;
     bool canFuse(const NodePtr& node) const override;
     bool created() const override;
 
-    InferenceEngine::Precision getRuntimePrecision() const override;
+    ov::element::Type getRuntimePrecision() const override;
     size_t descInputNumbers() override {
         return getOriginalInputsNumber();
     }
@@ -41,8 +41,9 @@ public:
     void execute(dnnl::stream strm) override;
     void executeDynamicImpl(dnnl::stream strm) override;
 
-    static bool isSupportedOperation(const std::shared_ptr<const ngraph::Node>& op, std::string& errorMessage) noexcept;
-    const std::vector<impl_desc_type>& getPrimitivesPriority() override;
+    static bool isSupportedOperation(const std::shared_ptr<const ov::Node>& op, std::string& errorMessage) noexcept;
+    const std::vector<impl_desc_type>& getDefaultImplPriority() override;
+    bool canBeExecutedInInt8() const override;
 
 protected:
     AttrPtr initPrimitiveAttr() override;

@@ -2,17 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#include <common_test_utils/ov_tensor_utils.hpp>
-#include "ngraph_functions/builders.hpp"
+#include "common_test_utils/ov_tensor_utils.hpp"
 #include "shared_test_classes/base/ov_subgraph.hpp"
 #include "test_utils/cpu_test_utils.hpp"
 
-using namespace InferenceEngine;
 using namespace CPUTestUtils;
-using namespace ngraph::opset3;
-using namespace ov::test;
 
-namespace CPULayerTestsDefinitions {
+namespace ov {
+namespace test {
 
 using ReorgYoloCPUParamsTuple = typename std::tuple<InputShape,     // Input Shape
                                                     size_t,         // stride
@@ -29,9 +26,9 @@ public:
         TargetDevice targetDev;
         std::tie(inputShape, stride, netPrecision, targetDev) = obj.param;
         std::ostringstream result;
-        result << "IS=" << CommonTestUtils::partialShape2str({inputShape.first}) << "_";
+        result << "IS=" << ov::test::utils::partialShape2str({inputShape.first}) << "_";
         for (const auto& item : inputShape.second) {
-            result << CommonTestUtils::vec2str(item) << "_";
+            result << ov::test::utils::vec2str(item) << "_";
         }
         result << "stride=" << stride << "_";
         result << "netPRC=" << netPrecision << "_";
@@ -48,11 +45,11 @@ protected:
 
         init_input_shapes({inputShape});
 
-        auto param = std::make_shared<ngraph::op::Parameter>(ngraph::element::f32, inputDynamicShapes[0]);
-        auto reorg_yolo = std::make_shared<ngraph::op::v0::ReorgYolo>(param, stride);
-        function = std::make_shared<ngraph::Function>(std::make_shared<ngraph::opset1::Result>(reorg_yolo),
-                                                      ngraph::ParameterVector{param},
-                                                      "ReorgYolo");
+        auto param = std::make_shared<ov::op::v0::Parameter>(ov::element::f32, inputDynamicShapes[0]);
+        auto reorg_yolo = std::make_shared<ov::op::v0::ReorgYolo>(param, stride);
+        function = std::make_shared<ov::Model>(std::make_shared<ov::op::v0::Result>(reorg_yolo),
+                                               ov::ParameterVector{param},
+                                               "ReorgYolo");
     }
 };
 
@@ -70,12 +67,12 @@ const std::vector<ov::test::InputShape> inShapesDynamic2 = {{{{1, 2}, -1, -1, -1
 const auto testCase_stride2_Dynamic = ::testing::Combine(::testing::ValuesIn(inShapesDynamic),
                                                          ::testing::Values(strides[0]),
                                                          ::testing::Values(ov::element::f32),
-                                                         ::testing::Values(CommonTestUtils::DEVICE_CPU));
+                                                         ::testing::Values(ov::test::utils::DEVICE_CPU));
 
 const auto testCase_stride3_Dynamic = ::testing::Combine(::testing::ValuesIn(inShapesDynamic2),
                                                          ::testing::Values(strides[1]),
                                                          ::testing::Values(ov::element::f32),
-                                                         ::testing::Values(CommonTestUtils::DEVICE_CPU));
+                                                         ::testing::Values(ov::test::utils::DEVICE_CPU));
 
 INSTANTIATE_TEST_SUITE_P(smoke_TestsReorgYolo_stride2_DynamicShape,
                          ReorgYoloLayerCPUTest,
@@ -87,4 +84,5 @@ INSTANTIATE_TEST_SUITE_P(smoke_TestsReorgYolo_stride3_DynamicShape,
                          testCase_stride3_Dynamic,
                          ReorgYoloLayerCPUTest::getTestCaseName);
 
-};  // namespace CPULayerTestsDefinitions
+}  // namespace test
+}  // namespace ov

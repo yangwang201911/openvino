@@ -464,6 +464,8 @@ static void regenum_graph_ResizeAlgorithm(py::module m) {
         .value("RESIZE_LINEAR", ov::preprocess::ResizeAlgorithm::RESIZE_LINEAR)
         .value("RESIZE_CUBIC", ov::preprocess::ResizeAlgorithm::RESIZE_CUBIC)
         .value("RESIZE_NEAREST", ov::preprocess::ResizeAlgorithm::RESIZE_NEAREST)
+        .value("RESIZE_BILINEAR_PILLOW", ov::preprocess::ResizeAlgorithm::RESIZE_BILINEAR_PILLOW)
+        .value("RESIZE_BICUBIC_PILLOW", ov::preprocess::ResizeAlgorithm::RESIZE_BICUBIC_PILLOW)
         .export_values();
 }
 
@@ -530,6 +532,6 @@ void regclass_graph_PrePostProcessor(py::module m) {
     });
 
     proc.def("__repr__", [](const ov::preprocess::PrePostProcessor& self) -> std::string {
-        return "<PrePostProcessor: " + py::cast(self).attr("__str__")().cast<std::string>() + ">";
+        return "<" + Common::get_class_name(self) + ": " + py::cast(self).attr("__str__")().cast<std::string>() + ">";
     });
 }

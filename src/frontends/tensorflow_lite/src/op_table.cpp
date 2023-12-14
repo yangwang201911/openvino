@@ -66,7 +66,7 @@ std::map<std::string, CreatorFunction> get_supported_ops() {
         // CUMSUM
         // CUSTOM
         // DELEGATE
-        // DENSIFY
+        {"DENSIFY", translate_identity_op},
         {"DEPTH_TO_SPACE", DEQUANTIZE_INPUTS(depth_to_space)},
         {"DEPTHWISE_CONV_2D", DEQUANTIZE_INPUTS(depthwise_conv2d)},
         {"DEQUANTIZE", DEQUANTIZE_INPUTS(dequantize)},
@@ -193,7 +193,7 @@ std::map<std::string, CreatorFunction> get_supported_ops() {
         // UNSORTED_SEGMENT_SUM
         // VAR_HANDLE
         {"WHERE", OP_CONVERT_TYPE_RENAME(translate_where_op, "Where")},
-        // WHILE
+        {"WHILE", while_op},
         {"ZEROS_LIKE", DEQUANTIZE_INPUTS(translate_zeros_like_op)},
     };
 }

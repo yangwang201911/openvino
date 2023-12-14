@@ -5,7 +5,9 @@
 #include <common_test_utils/test_constants.hpp>
 #include "execution_graph_tests/add_output.hpp"
 #include "functional_test_utils/plugin_cache.hpp"
-#include "ngraph_functions/builders.hpp"
+#include "ngraph/op/multiply.hpp"
+#include "ngraph/op/sigmoid.hpp"
+#include "ov_models/builders.hpp"
 
 using namespace ngraph;
 
@@ -16,7 +18,7 @@ inline InferenceEngine::CNNNetwork getTargetNetwork() {
     auto input = std::make_shared<op::v0::Parameter>(type, shape);
     auto mem_i = std::make_shared<op::v0::Constant>(type, shape, 0);
     auto mem_r = std::make_shared<op::v3::ReadValue>(mem_i, "id");
-    auto mul   = std::make_shared<ngraph::op::v1::Multiply>(mem_r, input);
+    auto mul   = std::make_shared<ov::op::v1::Multiply>(mem_r, input);
     auto mem_w = std::make_shared<op::v3::Assign>(mul, "id");
     auto sigm = std::make_shared<ngraph::op::Sigmoid>(mul);
     mem_r->set_friendly_name("Memory");
@@ -29,7 +31,7 @@ inline InferenceEngine::CNNNetwork getTargetNetwork() {
 }
 
 std::vector<addOutputsParams> testCases = {
-        addOutputsParams(getTargetNetwork(), {"Memory"}, CommonTestUtils::DEVICE_CPU)
+        addOutputsParams(getTargetNetwork(), {"Memory"}, ov::test::utils::DEVICE_CPU)
 };
 
 INSTANTIATE_TEST_SUITE_P(smoke_AddOutputBasic, AddOutputsTest,

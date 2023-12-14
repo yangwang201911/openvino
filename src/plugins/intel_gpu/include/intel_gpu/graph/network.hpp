@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "openvino/runtime/threading/cpu_streams_executor.hpp"
+
 #include "intel_gpu/graph/topology.hpp"
 #include "intel_gpu/graph/program.hpp"
 #include "intel_gpu/graph/serialization/binary_buffer.hpp"
@@ -13,6 +15,8 @@
 #include "intel_gpu/runtime/event.hpp"
 #include "intel_gpu/runtime/stream.hpp"
 #include "intel_gpu/runtime/lru_cache.hpp"
+#include "intel_gpu/runtime/shape_predictor.hpp"
+#include "intel_gpu/plugin/variable_state.hpp"
 
 #include <map>
 #include <vector>
@@ -30,13 +34,15 @@ struct network_output {
     event::ptr get_event() const { return _event; }
 
     /// @brief Returns @ref memory object of the output. Blocked until associated @ref event is not complete.
-    memory::ptr get_memory() const {
+    memory::ptr get_memory(bool do_sync = true) const {
         // TODO: in_order queue doesn't create proper output event in some cases which leads to syncronization issues with user app
         // So call finish for associated stream to enusre that the output data is ready.
-        if (_stream->get_queue_type() == QueueTypes::in_order) {
-            _stream->finish();
-        } else {
-            _event->wait();
+        if (do_sync) {
+            if (_stream->get_queue_type() == QueueTypes::in_order) {
+                _stream->finish();
+            } else {
+                _event->wait();
+            }
         }
         return _result;
     }
@@ -61,47 +67,35 @@ struct network {
 public:
     using ptr = std::shared_ptr<network>;
 
-    struct VariableState {
-        using Ptr = std::shared_ptr<VariableState>;
-
-        cldnn::memory_ptr memory;
-        bool is_set;
-        VariableState(cldnn::memory_ptr mem = nullptr) :
-            memory { mem }, is_set { false } {
-        }
-    };
-    using variables_states_map = std::map<std::string, VariableState::Ptr>;
-
     explicit network(program::ptr program, const ExecutionConfig& config, stream::ptr stream, bool is_internal = false, bool is_primary_stream = true);
     network(engine& engine,
             const topology& topo,
             const ExecutionConfig& config = {},
-            bool is_internal = false);
+            bool is_internal = false,
+            std::shared_ptr<ov::threading::IStreamsExecutor> task_executor = nullptr);
+
     network(engine& engine,
             const std::set<std::shared_ptr<program_node>>& nodes,
             const ExecutionConfig& config,
-            std::shared_ptr<InferenceEngine::CPUStreamsExecutor> task_executor,
+            std::shared_ptr<ov::threading::IStreamsExecutor> task_executor,
             bool is_internal);
 
     network(program::ptr program, uint16_t stream_id = 0);
 
     network(program::ptr program, stream::ptr stream, uint16_t stream_id);
 
-    network(cldnn::BinaryInputBuffer& ifs, stream::ptr stream, engine& engine, bool is_primary_stream = true);
-    network(cldnn::BinaryInputBuffer& ifs, const ExecutionConfig& config, stream::ptr stream, engine& engine, bool is_primary_stream = true);
-
     ~network();
-
-    void save(cldnn::BinaryOutputBuffer& ob);
 
     static ptr build_network(engine& engine,
                              const topology& topology,
                              const ExecutionConfig& config = {},
+                             std::shared_ptr<ov::threading::IStreamsExecutor> task_executor = nullptr,
                              bool is_internal = false);
+
     static ptr build_network(engine& engine,
                              const std::set<std::shared_ptr<program_node>>& nodes,
                              const ExecutionConfig& config,
-                             std::shared_ptr<InferenceEngine::CPUStreamsExecutor> task_executor,
+                             std::shared_ptr<ov::threading::IStreamsExecutor> task_executor,
                              bool is_internal);
 
     static ptr allocate_network(stream::ptr stream,
@@ -118,8 +112,8 @@ public:
     engine& get_engine() const { return _engine; }
 
     void reset_execution(bool wait = true);
-    void set_input_data(const primitive_id& id, memory::ptr data);
-    void set_output_memory(const primitive_id& id, memory::ptr mem);
+    event::ptr set_input_data(const primitive_id& id, memory::ptr data);
+    std::vector<event::ptr> set_output_memory(const primitive_id& id, memory::ptr mem);
 
     std::vector<std::shared_ptr<primitive_inst>> const& get_outputs() { return _outputs; }
 
@@ -208,6 +202,7 @@ public:
     void configure_primitives_second_output();
     void build_insts_deps();
     uint32_t get_id() const { return net_id; }
+    uint32_t get_local_id() const { return _local_net_id; }
     stream& get_stream() const { return *_stream; }
     stream::ptr get_stream_ptr() const { return _stream; }
     bool is_internal() const { return _internal; }
@@ -219,13 +214,21 @@ public:
         return *_memory_pool;
     }
 
-    /// Assigns memory state locations
-    void assign_variables_memories(variables_states_map &&variables_memories);
-
-    /// Returns memory state @p variable_id of stateful network
-    VariableState& get_variable_memory(const std::string &variable_id);
+    void set_variable(const std::string& name, const std::shared_ptr<ov::intel_gpu::VariableState>& variable);
+    bool has_variable(const std::string &variable_id) const;
+    ov::intel_gpu::VariableState& get_variable(const std::string &variable_id) const;
+    const ov::intel_gpu::VariableStateInfo& get_variable_info(const std::string &variable_id) const;
+    const ov::intel_gpu::VariablesMap& get_variables() const;
+    const ov::intel_gpu::VariablesInfoMap& get_variables_info() const;
 
     const ExecutionConfig& get_config() const { return _config; }
+
+    std::shared_ptr<ShapePredictor> get_shape_predictor() { return _shape_predictor; }
+    void set_shape_predictor(std::shared_ptr<ShapePredictor> shape_predictor) { _shape_predictor = shape_predictor; }
+
+#ifdef GPU_DEBUG_CONFIG
+    int64_t get_current_iteration_num() { return iteration; }
+#endif
 
 private:
     using output_chains_map = std::map<primitive_id, std::vector<std::shared_ptr<primitive_inst>>>;
@@ -240,6 +243,8 @@ private:
     bool _is_dynamic = false;
     bool _enable_profiling = false;
     bool _reset_arguments;
+    uint32_t _local_net_id = 0;     // This is for thread-safe deserialization. 'net_id' is globally unique,
+                                    // but '_local_net_id' is unique only in each intel_gpu::Graph.
 
     std::unordered_map<primitive_id, std::shared_ptr<primitive_inst>> _primitives;
     std::vector<shared_mem_type> _in_out_shared_mem_types;
@@ -247,14 +252,20 @@ private:
     std::vector<std::shared_ptr<primitive_inst>> _outputs;
     std::list<std::shared_ptr<primitive_inst>> _exec_order;
     std::list<std::shared_ptr<primitive_inst>> _data_outputs;
-    variables_states_map _variables_states;
-    std::vector<std::shared_ptr<primitive_inst>> _variable_state_primitives;
+
+    ov::intel_gpu::VariablesMap _variables_states;
+    ov::intel_gpu::VariablesInfoMap _variables_state_info;
+
     program::primitives_info _prims_info;
     std::map<primitive_id, primitive_id> _ext_id_mapping;
     size_t _weights_cache_capacity = 1;
 
     std::unordered_map<primitive_id, event::ptr> _events;
+    // This map is used to temporarily hold events that will be deallocated later
+    std::unordered_map<primitive_id, event::ptr> _old_events;
     output_chains_map _output_chains;
+
+    std::shared_ptr<ShapePredictor> _shape_predictor;
 
     void build_exec_order();
     void allocate_primitive_instance(program_node const& node);
@@ -266,6 +277,7 @@ private:
     void add_default_output_chains();
     void calculate_weights_cache_capacity();
     output_chains_map::iterator add_output_chain(std::shared_ptr<primitive_inst>& p_inst);
+    void set_variables_state_info(const std::string& variable_id, const layout& variable_layout);
 
 #ifdef GPU_DEBUG_CONFIG
     int64_t iteration = 0;
