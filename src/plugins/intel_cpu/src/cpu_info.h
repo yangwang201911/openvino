@@ -4,26 +4,31 @@
 
 #pragma once
 
-#include <string>
-#include <mutex>
 #include <cpu/x64/xbyak/xbyak_util.h>
-#include <cpu/x64/cpu_isa_traits.hpp>
+
 #include <cpu/x64/amx_tile_configure.hpp>
+#include <cpu/x64/cpu_isa_traits.hpp>
+#include <mutex>
+#include <string>
+using Xbyak::Tmm;
 using Xbyak::Xmm;
 using Xbyak::Ymm;
 using Xbyak::Zmm;
-using Xbyak::Tmm;
 using Xbyak::util::Cpu;
 #include <cpu/platform.hpp>
 
-#include "ie_precision.hpp"
+#include "openvino/core/type/element_type.hpp"
+
+#define MAX_CPUS 64
 
 namespace ov {
 namespace intel_cpu {
+extern float runtimeFreq;
+float get_runtime_freq(int core_id = 0);
 class CPUInfo {
 public:
     CPUInfo();
-    float getPeakGOPSImpl(InferenceEngine::Precision precision);
+    float getPeakGOPSImpl(ov::element::Type precision);
     void printDetails();
 
 private:
@@ -116,7 +121,7 @@ private:
         return have_amx_int8;
     }
 
-    float calcComputeBlockIPC(InferenceEngine::Precision precision);
+    float calcComputeBlockIPC(ov::element::Type precision);
 
     float getFrequency(const std::string path);
     float getMaxCPUFreq(size_t core_id);
@@ -144,7 +149,7 @@ private:
     // Micro architecture level
     uint32_t simd_size = 1;
     float instructions_per_cycle = 1.0f;
-    uint32_t operations_per_compute_block = 1;
+    uint32_t operations_per_instruction = 1;
 
     // Machine architecture level
     float freqGHz = 1.0f;
@@ -208,11 +213,11 @@ struct RegMap<Xbyak::Tmm> {
         dnnl::impl::cpu::x64::palette_config_t tconf = {0};
         auto palette_id = dnnl::impl::cpu::x64::amx::get_target_palette();
         tconf.palette_id = palette_id;
-        for (int index = 0; index < 8 ; index++) {
-            tconf.rows[index] = 16; //dnnl::impl::cpu::x64::amx::get_max_rows(tconf.palette_id);
+        for (int index = 0; index < 8; index++) {
+            tconf.rows[index] = 16;  // dnnl::impl::cpu::x64::amx::get_max_rows(tconf.palette_id);
         }
         for (int index = 0; index < 8; index++) {
-            tconf.cols[index] = 64; //dnnl::impl::cpu::x64::amx::get_max_column_bytes(tconf.palette_id);
+            tconf.cols[index] = 64;  // dnnl::impl::cpu::x64::amx::get_max_column_bytes(tconf.palette_id);
         }
         // configura AMX tiles
         dnnl::impl::cpu::x64::amx_tile_configure((const char*)&tconf);
@@ -249,9 +254,13 @@ struct RegMap<Xbyak::Tmm> {
 template <typename RegType, typename Gen, typename F>
 struct ThroughputGenerator {
     void operator()(Gen* g, RegMap<RegType>& rm, F f, int num_insn) {
-        for (int j = 0; j < num_insn / 12; j++)
-            for (int i = 0; i < 12; i++)
+        for (int j = 0; j < num_insn / 12; j++) {
+            runtimeFreq += get_runtime_freq();
+            runtimeFreq = runtimeFreq / (j + 1);
+            for (int i = 0; i < 12; i++) {
                 f(g, 4 + i, 4 + i);
+            }
+        }
     }
 };
 

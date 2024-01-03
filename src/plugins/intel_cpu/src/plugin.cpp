@@ -694,7 +694,7 @@ ov::Any Engine::get_property(const std::string& name, const ov::AnyMap& options)
     }
     return get_ro_property(name, options);
 }
-static float GetGOPS(intel_cpu::CPUInfo& cpu_info, InferenceEngine::Precision dt) {
+static float GetGOPS(intel_cpu::CPUInfo& cpu_info, ov::element::Type dt) {
     auto ret = cpu_info.getPeakGOPSImpl(dt);
     return ret;
 }
@@ -745,12 +745,12 @@ ov::Any Engine::get_metric_legacy(const std::string& name, const ov::AnyMap& opt
         return true;
     } else if (name == METRIC_KEY(DEVICE_GOPS)) {
         CPUInfo cpu_info;
-        std::map<InferenceEngine::Precision, float> gops;
-        gops[InferenceEngine::Precision::I8] = GetGOPS(cpu_info, InferenceEngine::Precision::I8);
-        gops[InferenceEngine::Precision::BIN] = GetGOPS(cpu_info, InferenceEngine::Precision::BIN);
-        gops[InferenceEngine::Precision::FP16] = GetGOPS(cpu_info, InferenceEngine::Precision::FP16);
-        gops[InferenceEngine::Precision::FP32] = GetGOPS(cpu_info, InferenceEngine::Precision::FP32);
-        IE_SET_METRIC_RETURN(DEVICE_GOPS, gops);
+        std::map<element::Type, float> gops;
+        gops[ov::element::i8] = GetGOPS(cpu_info, ov::element::i8);
+        gops[ov::element::u1] = GetGOPS(cpu_info, ov::element::u1);
+        gops[ov::element::f16] = GetGOPS(cpu_info, ov::element::f16);
+        gops[ov::element::f32] = GetGOPS(cpu_info, ov::element::f32);
+        return decltype(ov::device::gops)::value_type(gops);
     } else if (ov::internal::supported_properties.name() == name) {
         return decltype(ov::internal::supported_properties)::value_type{
             ov::PropertyName{ov::internal::caching_properties.name(), ov::PropertyMutability::RO},
@@ -840,10 +840,10 @@ ov::Any Engine::get_ro_property(const std::string& name, const ov::AnyMap& optio
     } else if (name == ov::device::gops) {
         CPUInfo cpu_info;
         std::map<element::Type, float> gops;
-        gops[element::i8] = GetGOPS(cpu_info, InferenceEngine::Precision::I8);
-        gops[element::u1] = GetGOPS(cpu_info, InferenceEngine::Precision::BIN);
-        gops[element::f32] = GetGOPS(cpu_info, InferenceEngine::Precision::FP32);
-        gops[element::f16] = GetGOPS(cpu_info, InferenceEngine::Precision::FP16);
+        gops[element::i8] = GetGOPS(cpu_info, ov::element::i8);
+        gops[element::u1] = GetGOPS(cpu_info, ov::element::u1);
+        gops[element::f32] = GetGOPS(cpu_info, ov::element::f32);
+        gops[element::f16] = GetGOPS(cpu_info, ov::element::f16);
         return decltype(ov::device::gops)::value_type (gops);
     } else if (name == ov::internal::caching_properties) {
         std::vector<ov::PropertyName> cachingProperties = { ov::device::full_name };
