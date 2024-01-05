@@ -81,6 +81,7 @@ float CPUInfo::calcComputeBlockIPC(ov::element::Type precision) {
     typedef void (*func_t)(void);
     std::once_flag flag;
     float res = 0.0;
+    std::cout << "===== Precision: " << precision << " ============" << std::endl;
     auto execute_code = [&](std::string isa, int num_instructions = 1) {
         float ret = 0.0;
         if (g) {
@@ -93,12 +94,13 @@ float CPUInfo::calcComputeBlockIPC(ov::element::Type precision) {
                 duration b1 = clock_type::now().time_since_epoch();
                 exec();
                 duration e1 = clock_type::now().time_since_epoch();
-
-                ret =
-                    std::max(ret, (NUM_INSN * NUM_LOOP * num_instructions) / ((e1.count() - b1.count()) * runtimeFreq));
+                ret += ((NUM_INSN * NUM_LOOP * num_instructions) / ((e1.count() - b1.count()) * runtimeFreq));
             }
             delete g;
-            std::cout << "ISA: " << isa << "\t IPC = " << ret << std::endl;
+            ret = ret / NUM_ITER;
+            std::cout << "ISA: " << isa << "\tIPC: " << ret << "\tRuntime Freq: "<< runtimeFreq << std::endl;
+            runtimeFreq = 0.0;
+            std::cout << "=================================\n";
         }
         std::call_once(flag, [&]() {
             res = ret;
@@ -417,10 +419,9 @@ float CPUInfo::getPeakGOPSImpl(ov::element::Type precision) {
     //           << std::endl;
     // std::cout << "ISA information:                 " << ISA_detailed << std::endl;
 
-    printDetails();
+    //rintDetails();
     auto gflops =
         std::round(instructions_per_cycle * operations_per_instruction) * freqGHz * cores_per_socket * sockets_per_node;
-    std::cout << "===== Precision: " << precision << "\tGFLOPS: " << gflops << "======" << std::endl;
     return gflops;
 }
 
