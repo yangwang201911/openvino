@@ -1,4 +1,4 @@
-# Copyright (C) 2018-2023 Intel Corporation
+# Copyright (C) 2018-2024 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
 import os
@@ -23,12 +23,12 @@ with open(tflite_model_path, 'wb') as f:
 tflite_file_name = 'wrong_len_3.tflite'
 tflite_model_path = os.path.join(path_to_model_dir, tflite_file_name)
 with open(tflite_model_path, 'wb') as f:
-    f.write('TFL')
+    f.write(bytearray(b'TFL'))
     f.close()
 
 # 2. File length is enough, but FOURCC isn't aligned as expected
 tflite_file_name = 'wrong_pos.tflite'
 tflite_model_path = os.path.join(path_to_model_dir, tflite_file_name)
 with open(tflite_model_path, 'wb') as f:
-    f.write('   TFL3 ')
+    f.write(bytearray(b'   TFL3 '))
     f.close()

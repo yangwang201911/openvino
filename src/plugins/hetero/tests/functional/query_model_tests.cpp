@@ -1,4 +1,4 @@
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 #include "hetero_tests.hpp"
@@ -97,4 +97,20 @@ TEST_F(HeteroTests, query_dynamic_model_on_mixed) {
     EXPECT_EQ(1, names.size());
     // fallback plugin doesn't support dynamism
     ASSERT_TRUE(names.count("sub"));
+}
+
+TEST_F(HeteroTests, query_model_on_independent_parameter) {
+    ov::SupportedOpsMap supported_ops;
+    const std::string dev_name = "MOCK0.1";
+    const auto model = create_model_with_independent_parameter();
+    ASSERT_NO_THROW(supported_ops = core.query_model(model, "HETERO", {ov::device::priorities(dev_name)}));
+    std::unordered_set<std::string> names;
+    for (const auto& op : model->get_ops()) {
+        names.insert(op->get_friendly_name());
+    }
+    for (const auto& op : supported_ops) {
+        EXPECT_EQ(op.second, dev_name);
+        names.erase(op.first);
+    }
+    EXPECT_EQ(0, names.size());
 }

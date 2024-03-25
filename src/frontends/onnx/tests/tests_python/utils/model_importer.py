@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2018-2023 Intel Corporation
+# Copyright (C) 2018-2024 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
 import numpy as np
@@ -58,6 +58,8 @@ class ModelImportRunner(onnx.backend.test.BackendTest):
                     test_name = test_name.replace(string, "")
                 else:
                     test_name = test_name.replace(string, "_")
+
+            test_name = test_name.lower()
 
             test_case = ExtOnnxTestCase(
                 name=test_name,

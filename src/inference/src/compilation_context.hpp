@@ -1,4 +1,4 @@
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -31,10 +31,11 @@ struct ModelCache final {
 class CompiledBlobHeader final {
     std::string m_ieVersion;
     std::string m_fileInfo;
+    std::string m_runtimeInfo;
 
 public:
     CompiledBlobHeader();
-    CompiledBlobHeader(const std::string& ieVersion, const std::string& fileInfo);
+    CompiledBlobHeader(const std::string& ieVersion, const std::string& fileInfo, const std::string& runtimeInfo);
 
     const std::string& getIeVersion() const {
         return m_ieVersion;
@@ -42,6 +43,10 @@ public:
 
     const std::string& getFileInfo() const {
         return m_fileInfo;
+    }
+
+    const std::string& getRuntimeInfo() const {
+        return m_runtimeInfo;
     }
 
     friend std::istream& operator>>(std::istream& stream, CompiledBlobHeader& header);

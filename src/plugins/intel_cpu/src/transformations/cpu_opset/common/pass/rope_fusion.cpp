@@ -1,4 +1,4 @@
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -6,13 +6,15 @@
 
 #include <cstdint>
 #include <limits>
-#include <openvino/core/rt_info.hpp>
-#include <openvino/opsets/opset1.hpp>
-#include <openvino/opsets/opset6.hpp>
-#include <openvino/opsets/opset8.hpp>
-#include <openvino/pass/pattern/op/or.hpp>
-#include <openvino/pass/pattern/op/wrap_type.hpp>
-#include <transformations/utils/utils.hpp>
+
+#include "openvino/core/rt_info.hpp"
+#include "openvino/opsets/opset1.hpp"
+#include "openvino/opsets/opset6.hpp"
+#include "openvino/opsets/opset8.hpp"
+#include "openvino/pass/pattern/op/or.hpp"
+#include "openvino/pass/pattern/op/wrap_type.hpp"
+#include "openvino/pass/pattern/matcher.hpp"
+#include "transformations/utils/utils.hpp"
 
 #include "itt.hpp"
 #include "ov_ops/type_relaxed.hpp"
@@ -55,7 +57,7 @@ ov::intel_cpu::RoPEFusionGPTNEOX::RoPEFusionGPTNEOX() {
     // [x1, x2]*cos + [-x2, x1]*sin
     auto result = makePattern<opset1::Add>({mul_cos, mul_sin}, {{"auto_broadcast", "numpy"}});
 
-    matcher_pass_callback callback = [=](ngraph::pattern::Matcher& m) {
+    matcher_pass_callback callback = [=](ov::pass::pattern::Matcher& m) {
         PatternValidator validator(m);
         if (!validator) {
             return false;
@@ -86,6 +88,13 @@ ov::intel_cpu::RoPEFusionGPTNEOX::RoPEFusionGPTNEOX() {
         auto old_node = root;
         auto new_node = std::make_shared<RoPENode>(new_args, config);
         new_node->set_friendly_name(old_node->get_friendly_name());
+        ov::copy_runtime_info({pattern_map.at(x2neg).get_node_shared_ptr(),
+                                pattern_map.at(x_rotate_half).get_node_shared_ptr(),
+                                pattern_map.at(mul_cos).get_node_shared_ptr(),
+                                pattern_map.at(mul_sin).get_node_shared_ptr(),
+                                pattern_map.at(result).get_node_shared_ptr()},
+                                new_node);
+
         ov::replace_node(old_node, new_node);
 
         // this new node may match following additional matchers
@@ -94,7 +103,7 @@ ov::intel_cpu::RoPEFusionGPTNEOX::RoPEFusionGPTNEOX() {
         return true;
     };
 
-    auto m = std::make_shared<ngraph::pattern::Matcher>(result, matcher_name);
+    auto m = std::make_shared<ov::pass::pattern::Matcher>(result, matcher_name);
     this->register_matcher(m, callback);
 }
 
@@ -143,7 +152,9 @@ ov::intel_cpu::RoPEFusionCosSinPreprocess::RoPEFusionCosSinPreprocess() {
         auto index_Gather2 = makePattern<opset8::Gather>({slice_Slice2, gather_positions_2d, 0}, {{"batch_dims", 0}});
 
         auto unsqueeze = makePattern<opset1::Reshape>({index_Gather | index_Gather2, {1, 1, -1, head_dims}});
-        return unsqueeze;
+        auto unsqueeze2 = makePattern<opset1::Unsqueeze>({index_Gather2, 1});
+
+        return unsqueeze2 | unsqueeze;
     };
 
     auto cos_tab = prepare_cos_sin_gptneox(cos_const) | prepare_cos_sin_llama(cos_const);
@@ -152,7 +163,7 @@ ov::intel_cpu::RoPEFusionCosSinPreprocess::RoPEFusionCosSinPreprocess() {
     auto x = makePattern(ov::Rank(4));
     auto rope = makePattern<RoPENode>({x, cos_tab, sin_tab});
 
-    matcher_pass_callback callback = [=](ngraph::pattern::Matcher& m) {
+    matcher_pass_callback callback = [=](ov::pass::pattern::Matcher& m) {
         PatternValidator validator(m);
         if (!validator) {
             return false;
@@ -184,7 +195,7 @@ ov::intel_cpu::RoPEFusionCosSinPreprocess::RoPEFusionCosSinPreprocess() {
         register_new_node(rope_node);
         return true;
     };
-    auto m = std::make_shared<ngraph::pattern::Matcher>(rope, matcher_name);
+    auto m = std::make_shared<ov::pass::pattern::Matcher>(rope, matcher_name);
     this->register_matcher(m, callback);
 }
 
@@ -200,7 +211,7 @@ ov::intel_cpu::RoPEFusionIOSlicing::RoPEFusionIOSlicing() {
     auto x_emb = makePattern<RoPENode>({x, {}, {}}) | makePattern<RoPENode>({x, {}, {}, {}});
     auto result = makePattern<opset1::Concat>({x_emb, y}, {{"axis", -1}});
 
-    matcher_pass_callback callback = [=](ngraph::pattern::Matcher& m) {
+    matcher_pass_callback callback = [=](ov::pass::pattern::Matcher& m) {
         const auto& pattern_map = m.get_pattern_value_map();
         auto root = m.get_match_root();
 
@@ -221,13 +232,16 @@ ov::intel_cpu::RoPEFusionIOSlicing::RoPEFusionIOSlicing() {
         // remove slice & concat
         rope_node->set_argument(0, pattern_map.at(data));
         rope_node->set_friendly_name(root->get_friendly_name());
+        ov::copy_runtime_info({rope_node,
+                        pattern_map.at(result).get_node_shared_ptr()},
+                        rope_node);
         ov::replace_node(root, rope_node);
 
         rope_node->validate_and_infer_types();
         register_new_node(rope_node);
         return true;
     };
-    auto m = std::make_shared<ngraph::pattern::Matcher>(result, matcher_name);
+    auto m = std::make_shared<ov::pass::pattern::Matcher>(result, matcher_name);
     this->register_matcher(m, callback);
 }
 
@@ -248,7 +262,7 @@ ov::intel_cpu::RoPEFusionPreprocess::RoPEFusionPreprocess() {
     auto x = makePattern<opset1::Transpose>({input_slice | input_to_trans, {0, 2, 1, 3}});
     auto result = makePattern<RoPENode>({x, {}, {}}) | makePattern<RoPENode>({x, {}, {}, {}});
 
-    matcher_pass_callback callback = [=](ngraph::pattern::Matcher& m) {
+    matcher_pass_callback callback = [=](ov::pass::pattern::Matcher& m) {
         PatternValidator validator(m);
         if (!validator) {
             return false;
@@ -277,17 +291,17 @@ ov::intel_cpu::RoPEFusionPreprocess::RoPEFusionPreprocess() {
         register_new_node(rope_node);
         return true;
     };
-    auto m = std::make_shared<ngraph::pattern::Matcher>(result, matcher_name);
+    auto m = std::make_shared<ov::pass::pattern::Matcher>(result, matcher_name);
     this->register_matcher(m, callback);
 }
 
 // remove stridedslice from 0 to int32_max with stride 1
 ov::intel_cpu::EliminateStridedSlice::EliminateStridedSlice() {
     MATCHER_SCOPE(EliminateStridedSlice);
-    auto data = ov::pass::pattern::any_input(ngraph::pattern::has_static_rank());
-    auto begin = ov::pass::pattern::wrap_type<opset1::Constant>(ngraph::pattern::type_matches(ov::element::i32));
-    auto end = ov::pass::pattern::wrap_type<opset1::Constant>(ngraph::pattern::type_matches(ov::element::i32));
-    auto stride = ov::pass::pattern::wrap_type<opset1::Constant>(ngraph::pattern::type_matches(ov::element::i32));
+    auto data = ov::pass::pattern::any_input(ov::pass::pattern::has_static_rank());
+    auto begin = ov::pass::pattern::wrap_type<opset1::Constant>(ov::pass::pattern::type_matches(ov::element::i32));
+    auto end = ov::pass::pattern::wrap_type<opset1::Constant>(ov::pass::pattern::type_matches(ov::element::i32));
+    auto stride = ov::pass::pattern::wrap_type<opset1::Constant>(ov::pass::pattern::type_matches(ov::element::i32));
 
     auto strided_slice =
         ov::pass::pattern::wrap_type<opset1::StridedSlice>({data, begin, end, stride}, [](const Output<Node>& value) {
@@ -349,12 +363,12 @@ ov::intel_cpu::EliminateStridedSlice::EliminateStridedSlice() {
             return true;
         });
 
-    matcher_pass_callback callback = [=](ngraph::pattern::Matcher& m) {
+    matcher_pass_callback callback = [=](ov::pass::pattern::Matcher& m) {
         auto root = m.get_match_root();
         return replace_output_update_name(root->output(0), root->input_value(0));
     };
 
-    auto m = std::make_shared<ngraph::pattern::Matcher>(strided_slice, matcher_name);
+    auto m = std::make_shared<ov::pass::pattern::Matcher>(strided_slice, matcher_name);
     this->register_matcher(m, callback);
 }
 
@@ -373,8 +387,11 @@ ov::intel_cpu::RoPEFusionGPTJ::RoPEFusionGPTJ() {
 
     auto varsplit = makePattern<opset1::VariadicSplit>({gather_sin_cos, -1, {ndims / 2, -1}});
     varsplit->set_output_size(2);
-    auto unsqueeze_sin = makePattern<opset1::Reshape>({varsplit->output(0), {1, -1, 1, 32}});
-    auto unsqueeze_cos = makePattern<opset1::Reshape>({varsplit->output(1), {1, -1, 1, 32}});
+    // Reshape or UnSqueeze should both be support
+    auto unsqueeze_sin = makePattern<opset1::Reshape>({varsplit->output(0), {1, -1, 1, 32}}) |
+                         makePattern<opset1::Unsqueeze>({varsplit->output(0), 2});
+    auto unsqueeze_cos = makePattern<opset1::Reshape>({varsplit->output(1), {1, -1, 1, 32}}) |
+                         makePattern<opset1::Unsqueeze>({varsplit->output(1), 2});
     // repeate cos/sin table
     auto const_idx = makeConst(ov::element::i32, ov::PartialShape::dynamic(), [](const ov::op::v0::Constant& node) {
         const auto& vec = node.get_vector<int32_t>();
@@ -387,9 +404,6 @@ ov::intel_cpu::RoPEFusionGPTJ::RoPEFusionGPTJ() {
     });
     auto repeat_interleave_sin = makePattern<opset8::Gather>({unsqueeze_sin, const_idx, 3}, {{"batch_dims", 0}});
     auto repeat_interleave_cos = makePattern<opset8::Gather>({unsqueeze_cos, const_idx, 3}, {{"batch_dims", 0}});
-
-    auto t_cos = makePattern(ov::Rank(4));
-    auto t_sin = makePattern(ov::Rank(4));
 
     // x interleave (-x[:,:,:, 1::2], x[:,:,:, 0::2])
     auto slice_Slice_1174 = GenSlice(slice_Slice_965, 1, int32_max, 2, 3);
@@ -404,13 +418,16 @@ ov::intel_cpu::RoPEFusionGPTJ::RoPEFusionGPTJ() {
     auto ShapeOf_169068 = makePattern<opset1::ShapeOf>({stack_1182});
     auto flatten_Slice_1194 = GenSlice(ShapeOf_169068, 0, 3, 1, 0);
     auto flatten_Concat_1197 = makePattern<opset1::Concat>({flatten_Slice_1194, {-1}}, {{"axis", 0}});
+    // If with special zero, no need to use shapeof to get full shape
     auto flatten_Reshape_1198 = makePattern<opset1::Reshape>({stack_1182, flatten_Concat_1197});
+    auto flatten_Reshape_Zero =
+        makePattern<opset1::Reshape>({stack_1182, ov::pass::pattern::any_input()}, {{"special_zero", true}});
 
     // x*cos [B,L,H,ndims]
     auto mul_cos =
         makePattern<opset1::Multiply>({slice_Slice_965, repeat_interleave_cos}, {{"auto_broadcast", "numpy"}});
     auto mul_sin =
-        makePattern<opset1::Multiply>({flatten_Reshape_1198, repeat_interleave_sin}, {{"auto_broadcast", "numpy"}});
+        makePattern<opset1::Multiply>({flatten_Reshape_1198 | flatten_Reshape_Zero, repeat_interleave_sin}, {{"auto_broadcast", "numpy"}});
 
     // *cos + *sin
     auto rotary_emb = makePattern<opset1::Add>({mul_cos, mul_sin}, {{"auto_broadcast", "numpy"}});
@@ -421,7 +438,7 @@ ov::intel_cpu::RoPEFusionGPTJ::RoPEFusionGPTJ() {
 
     auto result = permute_Transpose_1213;
 
-    matcher_pass_callback callback = [=](ngraph::pattern::Matcher& m) {
+    matcher_pass_callback callback = [=](ov::pass::pattern::Matcher& m) {
         const auto& pattern_map = m.get_pattern_value_map();
         auto root = m.get_match_root();
         PatternValidator validator(m);
@@ -445,11 +462,35 @@ ov::intel_cpu::RoPEFusionGPTJ::RoPEFusionGPTJ() {
 
         auto new_node = std::make_shared<RoPENode>(new_args, config);
         new_node->set_friendly_name(old_node->get_friendly_name());
+        ov::copy_runtime_info({pattern_map.at(varsplit).get_node_shared_ptr(),
+                                pattern_map.at(repeat_interleave_sin).get_node_shared_ptr(),
+                                pattern_map.at(repeat_interleave_cos).get_node_shared_ptr(),
+                                pattern_map.at(neg_Multiply_1177).get_node_shared_ptr(),
+                                pattern_map.at(Unsqueeze_65524).get_node_shared_ptr(),
+                                pattern_map.at(Unsqueeze_65525).get_node_shared_ptr(),
+                                pattern_map.at(stack_1182).get_node_shared_ptr(),
+                                pattern_map.at(mul_cos).get_node_shared_ptr(),
+                                pattern_map.at(mul_sin).get_node_shared_ptr(),
+                                pattern_map.at(rotary_emb).get_node_shared_ptr(),
+                                pattern_map.at(cat_Concat_1211).get_node_shared_ptr(),
+                                pattern_map.at(permute_Transpose_1213).get_node_shared_ptr()},
+                                new_node);
         ov::replace_node(old_node, new_node);
+        // shapeof may be moved up from transpose to add,
+        // After RoPE fusion, shapeof must be moved to the data input of RoPE otherwise extra subgraph exists
+        std::shared_ptr<ov::Node> rotary_emb_node = pattern_map.at(rotary_emb).get_node_shared_ptr();
+        auto rotary_emb_out = rotary_emb_node->output(0);
+        if (rotary_emb_out.get_target_inputs().size() == 2) {
+            for (auto& input : rotary_emb_out.get_target_inputs()) {
+                if (ov::is_type<opset1::ShapeOf>(input.get_node())) {
+                    input.replace_source_output(pattern_map.at(view_Reshape));
+                }
+            }
+        }
         return true;
     };
 
-    auto m = std::make_shared<ngraph::pattern::Matcher>(result, matcher_name);
+    auto m = std::make_shared<ov::pass::pattern::Matcher>(result, matcher_name);
     this->register_matcher(m, callback);
 }
 
@@ -537,7 +578,7 @@ ov::intel_cpu::RoPEFusionChatGLM::RoPEFusionChatGLM(int split_output_id) {
 
     auto result = cat_Concat_505;
 
-    matcher_pass_callback callback = [=](ngraph::pattern::Matcher& m) {
+    matcher_pass_callback callback = [=](ov::pass::pattern::Matcher& m) {
         const auto& pattern_map = m.get_pattern_value_map();
         auto root = m.get_match_root();
         PatternValidator validator(m);
@@ -570,10 +611,160 @@ ov::intel_cpu::RoPEFusionChatGLM::RoPEFusionChatGLM(int split_output_id) {
 
         auto new_node = std::make_shared<RoPENode>(new_args, config);
         new_node->set_friendly_name(old_node->get_friendly_name());
+        ov::copy_runtime_info({pattern_map.at(flatten_Reshape_501).get_node_shared_ptr(),
+                        pattern_map.at(slice_Slice_443).get_node_shared_ptr(),
+                        pattern_map.at(cat_Concat_505).get_node_shared_ptr()},
+                        new_node);
         ov::replace_node(old_node, new_node);
         return true;
     };
 
-    auto m = std::make_shared<ngraph::pattern::Matcher>(result, matcher_name);
+    auto m = std::make_shared<ov::pass::pattern::Matcher>(result, matcher_name);
+    this->register_matcher(m, callback);
+}
+
+ov::intel_cpu::RoPEFusionQwen::RoPEFusionQwen(int split_output_id) {
+    MATCHER_SCOPE(RoPEFusionQwen);
+
+    // rotary_emb_cos & rotary_emb_sin are sliced by present kv-length (past-kv-length + cur_len)
+    auto rotary_emb_cos = makePattern("f32[1,?,1,?]");  // [1,..4096,1,128]
+    auto rotary_emb_sin = makePattern("f32[1,?,1,?]");  // [1,..4096,1,128]
+    auto qkv_proj = makePattern("f32[?,?,?]");          // f32[?,?,12288]
+
+    auto head_cnt = Symbol("head_cnt");
+    auto head_size = Symbol("head_size");
+
+    auto ListUnpack_410_VariadicSplit =
+        makePattern<opset1::VariadicSplit>({qkv_proj, 2, {head_cnt * head_size, head_cnt * head_size, -1}});
+    ListUnpack_410_VariadicSplit->set_output_size(3);
+    // B,L,H,S
+    auto view_Reshape_424 = makePattern<opset1::Reshape>(
+        {ListUnpack_410_VariadicSplit->output(split_output_id), {0, 0, head_cnt, head_size}},
+        {{"special_zero", true}});
+    auto slice_Slice_543 =
+        makePattern<opset1::StridedSlice>({view_Reshape_424, {0, 0, 0, 0}, {0, 0, 0, head_size}, {1, 1, 1, 1}},
+                                          {{"begin_mask", {1, 1, 1, 0}},
+                                           {"end_mask", {1, 1, 1, 0}},
+                                           {"new_axis_mask", {}},
+                                           {"shrink_axis_mask", {}},
+                                           {"ellipsis_mask", {}}});  //  tensor_array<f32[?,?,32,128]>
+
+    auto hidden_states = makePattern("f32[?,?,?]");  //
+    auto ShapeOf_485735 = makePattern<opset1::ShapeOf>({hidden_states}, {});
+    auto Multiply_567524 = makePattern<opset1::Multiply>({ShapeOf_485735, {-1}}, {{"auto_broadcast", "numpy"}});
+    auto Gather_377635 = makePattern<opset8::Gather>({Multiply_567524, {1}, 0}, {{"batch_dims", 0}});
+
+    auto input_ids = makePattern("i32[?,?]");  // [batch, length]
+    auto ShapeOf_409241 = makePattern<opset1::ShapeOf>({input_ids}, {});
+    auto Gather_311651 = makePattern<opset8::Gather>({ShapeOf_409241, {1}, 0}, {{"batch_dims", 0}});
+    auto neg_Multiply = makePattern<opset1::Multiply>({Gather_311651, {-1}}, {{"auto_broadcast", "numpy"}});
+
+    auto ScatterUpdate_463814 = makePattern<opset3::ScatterUpdate>({{0, 0}, {1}, Gather_377635 | neg_Multiply, {0}});
+
+    auto slice_Slice_446 =
+        makePattern<opset1::StridedSlice>({rotary_emb_cos, ScatterUpdate_463814, {0, INT_MAX}, {1, 1}},
+                                          {{"begin_mask", {1, 0}},
+                                           {"end_mask", {1, 0}},
+                                           {"new_axis_mask", {}},
+                                           {"shrink_axis_mask", {}},
+                                           {"ellipsis_mask", {}}});  //  tensor_array<f32[1,..4096,1,128]>
+    auto mul_Multiply_552 =
+        makePattern<opset1::Multiply>({slice_Slice_543, slice_Slice_446},
+                                      {{"auto_broadcast", "numpy"}});  //  tensor_array<f32[?,?,32,128]>
+
+    auto reshape_opt1 = [&](std::shared_ptr<Node> input_BLHS) {
+        auto ShapeOf_485814 = makePattern<opset1::ShapeOf>({input_BLHS}, {});
+        auto Gather_377647 = makePattern<opset8::Gather>({ShapeOf_485814, {1}, 0}, {{"batch_dims", 0}});
+        // batch-size, we don't care
+        auto Gather_377641 = makePattern("i32[1]");
+        auto ListConstruct_581_Concat =
+            makePattern<opset1::Concat>({Gather_377641, Gather_377647, {head_cnt}, {2}, {head_size / 2}},
+                                        {{"axis", 0}});
+        auto Gather_391791 = makePattern<opset8::Gather>({ShapeOf_485814, {0, 1}, 0}, {{"batch_dims", 0}});
+        auto ListConstruct_522_Concat = makePattern<opset1::Concat>({Gather_391791, {32}, {2}, {64}}, {{"axis", 0}});
+
+        auto reshape_Reshape_577 =
+            makePattern<opset1::Reshape>({input_BLHS, {-1, 2, head_size / 2}}, {{"special_zero", true}});
+        return makePattern<opset1::Reshape>({reshape_Reshape_577, ListConstruct_581_Concat | ListConstruct_522_Concat},
+                                            {{"special_zero", false}});  //  tensor_array<f32[?,?,32,2,64]>
+    };
+
+    auto reshape_opt2 = [&](std::shared_ptr<Node> input_BLHS) {
+        return makePattern<opset1::Reshape>({input_BLHS, {0, 0, 0, 2, head_size / 2}},
+                                            {{"special_zero", true}});  //  tensor_array<f32[?,?,32,2,64]>
+    };
+
+    auto ListUnpack_586_Split =
+        makePattern<opset1::Split>({reshape_opt1(slice_Slice_543) | reshape_opt2(slice_Slice_543), -2},
+                                   {{"num_splits", 2}});  //  tensor_array<f32[?,?,32,1,64] f32[?,?,32,1,64]>
+    ListUnpack_586_Split->set_output_size(2);
+    auto Multiply_567527 =
+        makePattern<opset1::Multiply>({ListUnpack_586_Split->output(1), -1.000000f},
+                                      {{"auto_broadcast", "numpy"}});  //  tensor_array<f32[?,?,32,1,64]>
+    auto ListUnpack_586_Squeeze_0 =
+        makePattern<opset1::Squeeze>({Multiply_567527, -2});  //  tensor_array<f32[?,?,32,64]>
+    auto ListUnpack_586_Squeeze =
+        makePattern<opset1::Squeeze>({ListUnpack_586_Split->output(0), -2});  //  tensor_array<f32[?,?,32,64]>
+    auto cat_Concat_593 = makePattern<opset1::Concat>({ListUnpack_586_Squeeze_0, ListUnpack_586_Squeeze},
+                                                      {{"axis", -1}});  //  tensor_array<f32[?,?,32,128]>
+    auto slice_Slice_470 =
+        makePattern<opset1::StridedSlice>({rotary_emb_sin, ScatterUpdate_463814, {0, INT_MAX}, {1, 1}},
+                                          {{"begin_mask", {1, 0}},
+                                           {"end_mask", {1, 0}},
+                                           {"new_axis_mask", {}},
+                                           {"shrink_axis_mask", {}},
+                                           {"ellipsis_mask", {}}});  //  tensor_array<f32[1,..4096,1,128]>
+    auto mul_Multiply_594 =
+        makePattern<opset1::Multiply>({cat_Concat_593, slice_Slice_470},
+                                      {{"auto_broadcast", "numpy"}});  //  tensor_array<f32[?,?,32,128]>
+    auto add_Add_597 = makePattern<opset1::Add>({mul_Multiply_552, mul_Multiply_594},
+                                                {{"auto_broadcast", "numpy"}});  //  tensor_array<f32[?,?,32,128]>
+
+    auto result = add_Add_597;
+    matcher_pass_callback callback = [=](ov::pass::pattern::Matcher& m) {
+        const auto& pattern_map = m.get_pattern_value_map();
+        auto root = m.get_match_root();
+        PatternValidator validator(m);
+        if (!validator) {
+            return false;
+        }
+
+        RoPENode::Config config;
+        OutputVector new_args;
+        config.is_qwen = true;
+        config.head_cnt = validator["head_cnt"];
+        config.head_size = validator["head_size"];
+        config.rotary_ndims = config.head_size;
+
+        if (split_output_id == 0) {
+            // query : split_output_id == 0
+            config.slice_start = 0;
+            config.slice_stop = config.head_cnt * config.head_size;
+        } else {
+            // key : split_output_id == 1
+            config.slice_start = config.head_cnt * config.head_size;
+            config.slice_stop = config.slice_start + config.head_cnt * config.head_size;
+        }
+
+        new_args.push_back(pattern_map.at(qkv_proj));
+        new_args.push_back(pattern_map.at(rotary_emb_cos));
+        new_args.push_back(pattern_map.at(rotary_emb_sin));
+
+        auto old_node = root;
+        auto new_node = std::make_shared<RoPENode>(new_args, config);
+        new_node->set_friendly_name(old_node->get_friendly_name());
+        ov::copy_runtime_info({pattern_map.at(Multiply_567527).get_node_shared_ptr(),
+                        pattern_map.at(ListUnpack_586_Squeeze_0).get_node_shared_ptr(),
+                        pattern_map.at(ListUnpack_586_Squeeze).get_node_shared_ptr(),
+                        pattern_map.at(cat_Concat_593).get_node_shared_ptr(),
+                        pattern_map.at(slice_Slice_470).get_node_shared_ptr(),
+                        pattern_map.at(mul_Multiply_594).get_node_shared_ptr(),
+                        pattern_map.at(add_Add_597).get_node_shared_ptr()},
+                        new_node);
+        ov::replace_node(old_node, new_node);
+        return true;
+    };
+
+    auto m = std::make_shared<ov::pass::pattern::Matcher>(result, matcher_name);
     this->register_matcher(m, callback);
 }

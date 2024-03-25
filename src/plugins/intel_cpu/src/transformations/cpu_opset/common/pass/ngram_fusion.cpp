@@ -1,10 +1,10 @@
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
 #include "ngram_fusion.hpp"
 #include "transformations/cpu_opset/common/op/ngram.hpp"
-#include <openvino/opsets/opset1.hpp>
+#include "openvino/opsets/opset1.hpp"
 #include <openvino/opsets/opset10.hpp>
 #include <openvino/core/graph_util.hpp>
 #include <openvino/core/dimension_tracker.hpp>

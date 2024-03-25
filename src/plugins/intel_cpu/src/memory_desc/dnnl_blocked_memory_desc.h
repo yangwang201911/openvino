@@ -1,13 +1,14 @@
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
 
+#include "dnnl_memory_desc.h"
 #include "blocked_memory_desc.h"
 #include "openvino/util/util.hpp"
-#include <cpu_memory.h>
-#include <dnnl_extension_utils.h>
+#include "cpu_memory.h"
+#include "dnnl_extension_utils.h"
 #include <common/memory_desc_wrapper.hpp>
 
 namespace ov {

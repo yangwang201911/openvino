@@ -1,4 +1,4 @@
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -10,7 +10,6 @@
 
 #include "common_test_utils/test_tools.hpp"
 #include "gtest/gtest.h"
-#include "ngraph/runtime/host_tensor.hpp"
 #include "openvino/core/model.hpp"
 #include "openvino/op/parameter.hpp"
 #include "openvino/op/relu.hpp"

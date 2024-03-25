@@ -1,13 +1,11 @@
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
 
-#include <ie_common.h>
 #include <node.h>
 #include <openvino/op/constant.hpp>
-#include <string>
 
 namespace ov {
 namespace intel_cpu {
@@ -39,9 +37,6 @@ public:
 
     bool needShapeInfer() const override { return false; }
     bool needPrepareParams() const override { return false; }
-
-protected:
-    void resetMemoryPtr(const MemoryCPtr& mem);
 
 private:
     void cloneBlobIfRequired();

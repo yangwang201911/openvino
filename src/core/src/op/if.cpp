@@ -1,4 +1,4 @@
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -94,9 +94,7 @@ void ov::op::v8::If::validate_and_infer_types() {
     }
 
     // Trying to get cond as const value
-    OPENVINO_SUPPRESS_DEPRECATED_START
-    if (const auto& cond_value = get_constant_from_source(if_condition)) {
-        OPENVINO_SUPPRESS_DEPRECATED_END
+    if (const auto cond_value = ov::util::get_constant_from_source(if_condition)) {
         // If cond is const shape and inference is run for one of bodies another body is skipped
         auto val = cond_value->cast_vector<bool>();
         NODE_VALIDATION_CHECK(this,

@@ -1,6 +1,8 @@
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
+
+#ifdef SNIPPETS_DEBUG_CAPS
 
 #pragma once
 
@@ -91,3 +93,4 @@ private:
 } // namespace op
 } // namespace snippets
 } // namespace ov
+#endif  // SNIPPETS_DEBUG_CAPS

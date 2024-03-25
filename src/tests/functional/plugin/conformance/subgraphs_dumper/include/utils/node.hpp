@@ -1,4 +1,4 @@
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
@@ -10,6 +10,7 @@
 
 #include "openvino/openvino.hpp"
 #include "openvino/op/util/op_types.hpp"
+#include "openvino/op/constant.hpp"
 
 namespace ov {
 namespace util {
@@ -18,6 +19,9 @@ template <typename dType>
 inline ov::conformance::InputInfo::Range
 get_const_ranges(const std::shared_ptr<ov::op::v0::Constant>& node) {
     size_t elements_count = ov::shape_size(node->get_shape());
+    if (elements_count == 0) {
+        throw std::runtime_error("Impossible to get const ranges! Incorrect const size!");
+    }
     const auto& const_values = node->cast_vector<dType>();
     auto max = *std::max_element(const_values.begin(), const_values.end());
     auto min = *std::min_element(const_values.begin(), const_values.end());

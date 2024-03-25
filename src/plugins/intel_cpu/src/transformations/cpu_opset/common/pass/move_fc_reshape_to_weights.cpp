@@ -1,4 +1,4 @@
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -73,7 +73,8 @@ ov::intel_cpu::MoveFCReshapeToWeights::MoveFCReshapeToWeights() {
                 return false;
 
             const auto comparison_start_pos = expected_shape.size() - node_shape.size();
-            return std::equal(node_shape.begin(), node_shape.end(), expected_shape.begin() + comparison_start_pos);
+            return std::equal(node_shape.begin(), node_shape.end(), expected_shape.begin() + comparison_start_pos) ||
+                   std::all_of(node_shape.cbegin(), node_shape.cend(), [](int dim) { return dim == 1; });
         };
 
         const auto mul = reshape->get_input_node_shared_ptr(0);

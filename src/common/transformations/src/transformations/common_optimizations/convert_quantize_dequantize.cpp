@@ -1,4 +1,4 @@
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -81,7 +81,7 @@ ov::pass::ConvertQuantizeDequantize::ConvertQuantizeDequantize() {
     auto scale_pattern = pass::pattern::any_input();
     auto mul_pattern = ov::pass::pattern::wrap_type<ov::op::v1::Multiply>({sub_pattern, scale_pattern});
 
-    ov::matcher_pass_callback callback = [=](pattern::Matcher& m) {
+    ov::matcher_pass_callback callback = [OV_CAPTURE_CPY_AND_THIS](pattern::Matcher& m) {
         auto pattern_map = m.get_pattern_value_map();
 
         if (transformation_callback(m.get_match_root())) {
@@ -168,14 +168,10 @@ ov::pass::ConvertQuantizeDequantize::ConvertQuantizeDequantize() {
         if (out_high_shape.rank().is_dynamic() || out_high_shape.rank().get_length() > data_shape.rank().get_length())
             return false;
 
-        OPENVINO_SUPPRESS_DEPRECATED_START
-        std::shared_ptr<Node> const_out_low = get_constant_from_source(new_out_low);
-        OPENVINO_SUPPRESS_DEPRECATED_END
+        std::shared_ptr<Node> const_out_low = ov::util::get_constant_from_source(new_out_low);
         if (const_out_low)
             new_out_low = const_out_low;
-        OPENVINO_SUPPRESS_DEPRECATED_START
-        std::shared_ptr<Node> const_out_high = get_constant_from_source(new_out_high);
-        OPENVINO_SUPPRESS_DEPRECATED_END
+        std::shared_ptr<Node> const_out_high = ov::util::get_constant_from_source(new_out_high);
         if (const_out_high)
             new_out_high = const_out_high;
 

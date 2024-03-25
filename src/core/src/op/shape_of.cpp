@@ -1,4 +1,4 @@
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -61,6 +61,9 @@ bool evaluate_bound(const Node* const node, ov::TensorVector& outputs, const boo
         const auto& out_et = outputs[0].get_element_type();
         auto eval_status =
             shape_of::evaluate_shape_of(outputs[0], is_upper ? in_shape.get_max_shape() : in_shape.get_min_shape());
+
+        if (in_shape.size() == 0)
+            return eval_status;
 
         // use node output type as it can be different than output tensor type
         // e.g. when v3::ShapeOf is converted to v0::ShapeOf then the output tensor will have always i64

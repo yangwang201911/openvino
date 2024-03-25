@@ -1,4 +1,4 @@
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -35,9 +35,6 @@ struct Configuration {
 
     std::string device_priorities;
     ov::AnyMap device_properties;
-
-private:
-    bool dump_graph;
 };
 }  // namespace hetero
 }  // namespace ov
