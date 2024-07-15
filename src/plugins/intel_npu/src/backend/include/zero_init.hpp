@@ -48,6 +48,9 @@ public:
     inline uint32_t getDriverExtVersion() const {
         return driver_ext_version;
     }
+    inline uint32_t getMutableCommandListVersion() const {
+        return mutable_command_list_version;
+    }
 
 private:
     static const ze_driver_uuid_t uuid;
@@ -61,6 +64,7 @@ private:
 
     ze_driver_properties_t driver_properties = {};
     uint32_t driver_ext_version = 0;
+    uint32_t mutable_command_list_version = 0;
 };
 
 }  // namespace intel_npu

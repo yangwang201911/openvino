@@ -12,29 +12,37 @@ set(OPTIONAL_FUNC_TESTS_INCLUDES "")
 set(OPTIONAL_FUNC_TESTS_LIBS "")
 
 ov_add_test_target(
-    NAME ${TARGET_NAME}
-    ROOT ${CMAKE_CURRENT_SOURCE_DIR}
-    EXCLUDED_SOURCE_PATHS
-        ${EXCLUDED_FUNC_TESTS_DIR}
-    INCLUDES
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${OPTIONAL_FUNC_TESTS_INCLUDES}
-        "${CMAKE_CURRENT_SOURCE_DIR}/shared_tests_instances"
-        "${CMAKE_CURRENT_SOURCE_DIR}/behavior"
-        "${CMAKE_CURRENT_SOURCE_DIR}/internal"
-    LINK_LIBRARIES
-        ${OPTIONAL_FUNC_TESTS_LIBS}
-        openvino::func_test_utils
-        openvino::funcSharedTests
-        openvino::format_reader
-        openvino::reference
-        openvino::runtime
-        openvino::npu_al
-)
+  NAME
+  ${TARGET_NAME}
+  ROOT
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  EXCLUDED_SOURCE_PATHS
+  ${EXCLUDED_FUNC_TESTS_DIR}
+  INCLUDES
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${OPTIONAL_FUNC_TESTS_INCLUDES}
+  "${CMAKE_CURRENT_SOURCE_DIR}/shared_tests_instances"
+  "${CMAKE_CURRENT_SOURCE_DIR}/behavior"
+  "${CMAKE_CURRENT_SOURCE_DIR}/internal"
+  LINK_LIBRARIES
+  ${OPTIONAL_FUNC_TESTS_LIBS}
+  openvino::func_test_utils
+  openvino::funcSharedTests
+  openvino::format_reader
+  openvino::reference
+  openvino::runtime
+  openvino::npu_al)
 
-set_target_properties(${TARGET_NAME} PROPERTIES
-                      FOLDER ${CMAKE_CURRENT_SOURCE_DIR}
-                      CXX_STANDARD 17)
+if(WIN32)
+    if(ENABLE_DX12)
+        target_compile_definitions(${TARGET_NAME} PRIVATE ENABLE_DX12)
+        target_link_libraries(${TARGET_NAME} PRIVATE d3d12 dxcore)
+    endif()
+endif()
+
+
+set_target_properties(
+  ${TARGET_NAME} PROPERTIES FOLDER ${CMAKE_CURRENT_SOURCE_DIR} CXX_STANDARD 17)
 
 if(MSVC)
     # Enforce standards conformance on MSVC

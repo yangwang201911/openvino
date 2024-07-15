@@ -27,6 +27,8 @@ public:
 
     bool isBatchingSupported() const override;
 
+    void* getContext() const override;
+
 private:
     std::shared_ptr<ZeroInitStructsHolder> _instance;
 

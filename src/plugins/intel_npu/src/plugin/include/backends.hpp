@@ -33,6 +33,7 @@ public:
     uint32_t getDriverExtVersion() const;
     bool isBatchingSupported() const;
     void registerOptions(OptionsDesc& options) const;
+    void* getContext() const;
     std::string getCompilationPlatform(const std::string_view platform, const std::string& deviceId) const;
 
     void setup(const Config& config);
