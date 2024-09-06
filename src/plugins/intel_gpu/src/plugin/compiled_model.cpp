@@ -106,15 +106,29 @@ CompiledModel::CompiledModel(std::shared_ptr<ov::Model> model,
                 //ov::serialize(model_clone, "./model_pa_o.xml", "./model_pa_o.bin");
                 ov::pass::Manager manager;
                 bool has_pa_op = false;
+                std::set<std::string> kvcache_op;
                 for (const auto& op : model_clone->get_ops()) {
                     if (std::dynamic_pointer_cast<ov::op::PagedAttentionExtension>(op)) {
                         has_pa_op = true;
-                        break;
+                        kvcache_op.insert(op->inputs()[3].get_source_output().get_node_shared_ptr()->get_friendly_name());
+                        kvcache_op.insert(op->inputs()[4].get_source_output().get_node_shared_ptr()->get_friendly_name());
                     }
                 }
 
-                if (has_pa_op)
+                if (has_pa_op) {
+                    std::map<size_t, ov::PartialShape> shapes;
+                    const auto& params = model_clone->get_parameters();
+                    for (size_t input_id = 0; input_id < params.size(); input_id++) {
+                        const auto& param = params[input_id];
+                        shapes[input_id] = param->get_output_partial_shape(0);
+                        if (kvcache_op.count(param->get_friendly_name())) {
+                            auto heads_num = shapes[input_id][1];
+                            shapes[input_id][1] = heads_num / config.get_context_for_tp().size();
+                        }
+                    }
+                    model_clone->reshape(shapes);
                     manager.register_pass<ov::intel_gpu::PATensorParallelFusion>(config.get_context_for_tp().size(), i);
+                }
                 manager.register_pass<ov::intel_gpu::RemainFCParallelFusion>(config.get_context_for_tp().size(), i);
                 manager.run_passes(model_clone);
                 //ov::serialize(model_clone, "integrated_vllm_pa_" + std::to_string(i) + ".xml");

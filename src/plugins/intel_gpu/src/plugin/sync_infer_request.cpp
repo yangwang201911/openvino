@@ -136,8 +136,6 @@ void SyncInferRequest::sub_streams_infer() {
     size_t requests_num = requests.size();
     auto inputs = get_inputs();
     auto outputs = get_outputs();
-    // auto inputs = get_inputs();
-    // auto outputs = get_outputs();
 
     if (requests.size() > 0) {
         for (const auto& output : outputs) {
@@ -148,21 +146,21 @@ void SyncInferRequest::sub_streams_infer() {
             for (auto& input : inputs) {
                 auto tensor = get_tensor(input);
                 if (auto remote = std::dynamic_pointer_cast<ov::intel_gpu::TupleRemoteTensorImpl>(tensor._ptr)) {
-                    requests[i]->set_tensor(input, remote->get_tensor(i));
+                    requests[i]->set_tensor(input,
+                                            remote->get_tensor_by_name(
+                                                requests[i]->get_compiled_model()->get_context()->get_device_name()));
                 } else {
                     requests[i]->set_tensor(input, tensor);
                 }
             }
 
             requests[i]->set_callback([message](const std::exception_ptr& ptr) {
-                // std::cout << "set_callback------ " << i << "\n";
                 ov::threading::MessageInfo msg_info;
                 msg_info.msg_type = ov::threading::MsgType::CALL_BACK;
                 message->send_message(msg_info);
             });
         }
         for (size_t i = 0; i < requests_num; i++) {
-            // std::cout << "start_async : " << i << "\n";
             requests[i]->start_async();
         }
     }
@@ -903,6 +901,16 @@ std::vector<cldnn::event::ptr> SyncInferRequest::prepare_input(const std::string
     }
 
     cldnn::event::ptr ret_event = nullptr;
+    if (!is_remote_tensor_impl && !is_generic_remote && !convert_needed) {
+        auto src_ptr = static_cast<uint8_t*>(user_tensor->data());
+        if (!same_host_mem(memory, src_ptr)) {
+            // WA: Set need_lockable_mem as a blocking argument
+            // The current input_layout (wait_for_events) does not provide proper synchronization for subsequent CPU implementations
+            // For IOQ, it creates an already set user event, leading to accessing memory that hasn't completed copying
+            // For OOOQ, it enqueues a barrier that is ignored by the memory_lock functions, also causing access to not ready memory
+            ret_event = memory->copy_from(stream, src_ptr, need_lockable_mem);
+        }
+    }
     if (convert_needed) {
         if (is_remote_tensor_impl) {
             convert_and_copy(remote_tensor_impl_ptr->get_memory(), device_tensor->get_memory(), stream);
