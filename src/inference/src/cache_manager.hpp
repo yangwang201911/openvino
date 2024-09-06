@@ -125,7 +125,13 @@ private:
     void write_cache_entry(const std::string& id, StreamWriter writer) override {
         // Fix the bug caused by pugixml, which may return unexpected results if the locale is different from "C".
         ScopedLocale plocal_C(LC_ALL, "C");
-        std::ofstream stream(getBlobFile(id), std::ios_base::binary | std::ofstream::out);
+        auto blobFileName = getBlobFile(id);
+        if (id.find_last_of('\\') != std::string::npos || id.find_last_of('/') != std::string::npos) {
+            auto directory = ov::util::get_directory(blobFileName);
+            if (!ov::util::directory_exists(directory))
+                ov::util::create_directory_recursive(directory);
+        }
+        std::ofstream stream(blobFileName, std::ios_base::binary | std::ofstream::out);
         writer(stream);
     }
 
@@ -137,10 +143,21 @@ private:
             std::ifstream stream(blobFileName, std::ios_base::binary);
             reader(stream);
         }
+        int index = 0;
+        auto subBlobFileName = getBlobFile(id + "/" + std::to_string(index));
+        while (ov::util::file_exists(subBlobFileName)) {
+            std::ifstream stream(subBlobFileName, std::ios_base::binary);
+            reader(stream);
+            subBlobFileName = getBlobFile(id + "/" + std::to_string(++index));
+        }
     }
 
     void remove_cache_entry(const std::string& id) override {
         auto blobFileName = getBlobFile(id);
+        auto directory = ov::util::get_directory(blobFileName) + id;
+        if (ov::util::directory_exists(directory)) {
+            std::remove(directory.c_str());
+        }
 
         if (ov::util::file_exists(blobFileName)) {
 #if defined(_WIN32) && defined(OPENVINO_ENABLE_UNICODE_PATH_SUPPORT)

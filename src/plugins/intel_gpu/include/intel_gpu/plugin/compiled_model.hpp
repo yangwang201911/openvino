@@ -41,6 +41,7 @@ public:
     std::shared_ptr<ov::ISyncInferRequest> create_sync_infer_request() const override;
 
     void export_model(std::ostream& model) const override;
+    void export_model(std::ostream& model, std::size_t index) const override;
 
     std::shared_ptr<const ov::Model> get_runtime_model() const override;
 
@@ -69,6 +70,12 @@ public:
     std::vector<std::shared_ptr<CompiledModel>> get_sub_compiled_models() const {
         return m_sub_compiled_models;
     }
+
+    std::size_t get_runtime_models_numb() const override {
+        return m_has_sub_compiled_models ? m_sub_compiled_models.size() : 1;
+    }
+
+    void insert_tp_compiled_model(CompiledModel::Ptr& compiled_model);
 
     std::vector<std::shared_ptr<CompiledModel>> m_sub_compiled_models;
     std::shared_ptr<SubMemoryManager> m_sub_memory_manager;

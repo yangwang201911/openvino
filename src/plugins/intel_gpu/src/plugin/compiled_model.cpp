@@ -294,6 +294,10 @@ void CompiledModel::export_model(std::ostream& model) const {
     get_graph(0)->export_model(ob);
 }
 
+void CompiledModel::export_model(std::ostream& model, std::size_t index) const {
+    return m_sub_compiled_models.at(index)->export_model(model);
+}
+
 CompiledModel::Ptr CompiledModel::get_tp_compiled_model() const {
     auto messenger = ov::threading::message_manager();
     for (auto& iter : m_sub_compiled_models) {
@@ -301,6 +305,10 @@ CompiledModel::Ptr CompiledModel::get_tp_compiled_model() const {
             return std::dynamic_pointer_cast<CompiledModel>(iter);
     }
     return nullptr;
+}
+
+void CompiledModel::insert_tp_compiled_model(CompiledModel::Ptr& compiled_model) {
+    m_sub_compiled_models.push_back(compiled_model);
 }
 
 std::shared_ptr<const ov::Model> CompiledModel::get_runtime_model() const {

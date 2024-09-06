@@ -147,3 +147,11 @@ ov::SoPtr<ov::IRemoteContext> ov::ICompiledModel::get_context() const {
 void ov::ICompiledModel::set_model_shared_object(ov::Model& model, const std::shared_ptr<void>& shared_object) {
     model.m_shared_object = shared_object;
 }
+
+std::size_t ov::ICompiledModel::get_runtime_models_numb() const {
+    return m_numb_of_runtime_models;
+}
+
+void ov::ICompiledModel::export_model(std::ostream& model, std::size_t index) const {
+    return;
+}
