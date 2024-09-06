@@ -146,7 +146,7 @@ void Memory::redefineDesc(MemoryDescPtr desc) {
 void Memory::update() {
     if (dnnlMemHandle.isInit()) {
         auto prim = dnnlMemHandle.getPrim();
-        prim.set_data_handle_no_pads_proc(m_mgrHandle->getRawPtr());
+        prim.set_data_handle(m_mgrHandle->getRawPtr());
     }
 }
 
@@ -178,12 +178,8 @@ dnnl::memory Memory::DnnlMemPrimHandle::getPrim() const {
         //
         // ========================
         auto data = m_memObjPtr->getDataNoThrow();
-        auto pads_zeroing = m_memObjPtr->m_padsZeroing;
         if (data != nullptr) {
-            if (pads_zeroing)
-                m_prim.set_data_handle(data);
-            else
-                m_prim.set_data_handle_no_pads_proc(data);
+            m_prim.set_data_handle(data);
         }
     }
     return m_prim;
@@ -499,10 +495,7 @@ StaticMemory::StaticMemory(const dnnl::engine& eng, MemoryDescPtr desc, const vo
         m_prim = dnnl::memory(dnnl_desc->getDnnlDesc(), m_eng, DNNL_MEMORY_NONE);
         //
         // ========================
-        if (pads_zeroing)
-            m_prim.set_data_handle(m_pMemMngr->getRawPtr());
-        else
-            m_prim.set_data_handle_no_pads_proc(m_pMemMngr->getRawPtr());
+        m_prim.set_data_handle(m_pMemMngr->getRawPtr());
     }
     catch (const std::exception& exc) {
         dnnlErrorCtx = exc.what();
@@ -713,7 +706,7 @@ MemoryPtr split_horizontal(const dnnl::engine& eng, const MemoryPtr src, int dim
     }
 
     auto srcPtr = static_cast<uint8_t*>(src->getData());
-    if (prec == ov::element::u4) {
+    if (prec == ov::element::u4 || prec == ov::element::i4) {
         stride /= 2;
     }
 
@@ -749,6 +742,7 @@ MemoryPtr split_vertical(const dnnl::engine& eng, const MemoryPtr src, int dim, 
         return ptr;
     }
     assert(dims[dim] >= w_size);
+    const auto splited_size = dims[dim] * prec.size();
     auto splited_dim_vec = split_parts(dims[dim], w_size);
     auto element_size = prec.size();
 
@@ -763,17 +757,22 @@ MemoryPtr split_vertical(const dnnl::engine& eng, const MemoryPtr src, int dim, 
     // copy
     auto srcPtr = static_cast<uint8_t*>(src->getData());
     auto dstPtr = static_cast<uint8_t*>(ptr->getData());
-    auto mem_size = src->getSize(); // total bytes
-    auto channel_size = dims[dim] * element_size; // selected dim bytes
-    const int step = (mem_size / channel_size); // the steps need to copy.
-    int stride = splited_dim_vec[0]; // elements of half selected dim.
-    if (prec == ov::element::u4) {
-        stride /= 2;
+    // selected dim bytes
+    auto channel_size = dims[dim] * element_size;
+    // total bytes
+    auto mem_size = src->getSize();
+    // the steps need to copy.
+    const int step = (mem_size / channel_size);
+    // bytes of selected dim.
+    auto strideSize = splited_dim_vec[0] * element_size;
+    auto copySize = splited_dim_vec[w_rank] * element_size;
+    if (prec == ov::element::u4 || prec == ov::element::i4) {
+        strideSize /= 2;
+        copySize /= 2;
     }
-    const auto copySize = stride * element_size; // bytes of half selected dim.
     parallel_for(step, [&](int i){
         int dst_offset = i * copySize;
-        int src_offset = i * copySize* 2 + w_rank * copySize;
+        int src_offset = i * splited_size + w_rank * strideSize;
         cpu_parallel_memcpy(dstPtr + dst_offset, srcPtr + src_offset, copySize);
     });
     return ptr;

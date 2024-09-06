@@ -80,13 +80,14 @@ KERNEL(quantize_input)(
 #   endif
 #endif
 #if TILE_K == 4 && COMPRESSED_WEIGHTS_INT4 && FILTER_LAYOUT_OS_IS_YX_OSV32_ISV2
-// Data stored in memory : f0k0k1|f16k0k1|f0k2k3|f16k2k3
-// => unpack as f0k0k1|f0k2k3|f16k0k1|f16k2k3 so that the weight access order is preserved 
-#define UNPACK_INT4 UNPACK_INT4x2_OSV32_ISV2
-#define UNPACK_TRANSPOSED_INT4 UNPACK_INT4x2_OSV32_ISV2
+    // Data stored in memory : f0k0k1|f16k0k1|f0k2k3|f16k2k3
+    // => unpack as f0k0k1|f0k2k3|f16k0k1|f16k2k3 so that the weight access order is preserved
+    #define UNPACK_INT4 UNPACK_INT4x2_OSV32_ISV2
+    // No need to apply transpose for dynamic quantizing. Weight values are located in order of tile_k : f0(k0,k1),f1(k2,k3)
+    #define UNPACK_TRANSPOSED_INT4 UNPACK_INT4x2_OSV32_ISV2
 #else
-#define UNPACK_INT4 UNPACK_INT4x2
-#define UNPACK_TRANSPOSED_INT4 UNPACK_TRANSPOSED_INT4x2
+    #define UNPACK_INT4 UNPACK_INT4x2
+    #define UNPACK_TRANSPOSED_INT4 UNPACK_TRANSPOSED_INT4x2
 #endif
 // Macros for vectorized types.
 #define INPUT_VEC_TYPE             MAKE_VECTOR_TYPE(INPUT0_TYPE, TILE_IFM)
@@ -107,7 +108,7 @@ KERNEL(quantize_input)(
 #define OUTPUT_BLOCK_WRITE(ptr, offset, val) BLOCK_WRITEN(OUTPUT_TYPE, TILE_OFM, ptr, offset, val)
 
 #define SLM_FILTER_VEC          MAKE_VECTOR_TYPE(ACCUMULATOR_TYPE, TILE_OFM)
-#define SLM_FILTER_PACKED_VEC   MAKE_VECTOR_TYPE(FILTER_TYPE, FILTER_LOAD_BLOCK_SIZE)
+#define SLM_FILTER_PACKED_VEC   MAKE_VECTOR_TYPE(FILTER_TYPE, FILTER_ACTUAL_LOAD_BLOCK_SIZE)
 #define SLM_FILTER_UNPACKED_VEC MAKE_VECTOR_TYPE(ACCUMULATOR_TYPE, FILTER_ELEMENTS_PER_LOAD)
 
 
@@ -116,25 +117,13 @@ KERNEL(quantize_input)(
 
 
 #if !REALIGN_FP16_OFFSET
-#   if OUTPUT_3D
-#       define MAIN_LOOP_ELEMENTS_COUNT  INPUT0_SIZE_Y
-#   else
-#       define MAIN_LOOP_ELEMENTS_COUNT  INPUT0_ELEMENTS_COUNT
-#   endif
+    #define MAIN_LOOP_ELEMENTS_COUNT  IFM_SIZE
 #else
-// For REALIGN_FP16_OFFSET one feature is processed separately before entering main loop to correct alignment.
-#   if OUTPUT_3D
-#       define MAIN_LOOP_ELEMENTS_COUNT  (INPUT0_SIZE_Y - 1)
-#   else
-#       define MAIN_LOOP_ELEMENTS_COUNT  (INPUT0_ELEMENTS_COUNT - 1)
-#   endif
+    // For REALIGN_FP16_OFFSET one feature is processed separately before entering main loop to correct alignment.
+    #define MAIN_LOOP_ELEMENTS_COUNT  (IFM_SIZE - 1)
 #endif
 
-#if OUTPUT_3D
-#   define INPUT_ELEMENTS_COUNT INPUT0_SIZE_Y
-#else
-#   define INPUT_ELEMENTS_COUNT INPUT0_ELEMENTS_COUNT
-#endif
+#define INPUT_ELEMENTS_COUNT IFM_SIZE
 
 #if IS_DYNAMIC && COMPRESSED_WEIGHTS_INT4
 #pragma disable_includes_optimization
@@ -316,13 +305,14 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
         // NOTE: Manually unrolling multiplication loop leads to lower register pressure and allows for bigger block sizes,
         //       but significantly degrades readability and generality of code.
         //       It doesn't also show noticable performance improvement on tested configurations.
-        #if DECOMPRESSION_SCALE_POST_OP
-            ACCUMULATOR_VEC_TYPE acc_tmp[TILE_B] = { };
-        #endif
+        ACCUMULATOR_VEC_TYPE acc_tmp[TILE_B] = { };
 
         #if USE_SLM && COMPRESSED_WEIGHTS_INT4
             #if TILE_OFM != 2
             #error "FC bf_tiled kernel: can't use SLM optimization with TILE_OFM != 2"
+            #endif
+            #if FILTER_LAYOUT_OS_IYX_OSV16 && TILE_K != 4
+            #error "FC bf_tiled kernel: can't use SLM optimization with TILE_K != 2 && OS_IYX_OSV16 layout"
             #endif
 
             // Skip first barrier synchronization if there is only single outer loop iteration.
@@ -332,12 +322,19 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
 
             __local SLM_FILTER_VEC* slm_wei_vec = (__local SLM_FILTER_VEC*)wei_local_mem;
 
-            uint weights_idx = weights_offset + local_id * SIMD * FILTER_LOAD_ITERS * FILTER_LOAD_BLOCK_SIZE;
+            uint weights_idx = weights_offset + local_id * SIMD * FILTER_LOAD_ITERS * FILTER_ACTUAL_LOAD_BLOCK_SIZE;
             uint wei_local_idx = local_id * SIMD * FILTER_LOAD_ITERS * FILTER_LOAD_BLOCK_SIZE + sglid;
-
             unroll_for(uint load_iter = 0; load_iter < FILTER_LOAD_ITERS; ++load_iter) {
-                SLM_FILTER_PACKED_VEC wei_packed = BLOCK_READN(FILTER_TYPE, FILTER_LOAD_BLOCK_SIZE, weights, weights_idx);
+                #if FILTER_LAYOUT_OS_IYX_OSV16
+                SLM_FILTER_PACKED_VEC wei_packed0 = BLOCK_READN(FILTER_TYPE, FILTER_ACTUAL_LOAD_BLOCK_SIZE, weights, weights_idx);
+                SLM_FILTER_PACKED_VEC wei_packed1 = BLOCK_READN(FILTER_TYPE, FILTER_ACTUAL_LOAD_BLOCK_SIZE, weights, (weights_idx + ((IFM_SIZE / 2) * 16)));
+                SLM_FILTER_UNPACKED_VEC wei_unpacked;
+                wei_unpacked.s0123 = UNPACK_INT4(ACCUMULATOR_TYPE, *((INT4_PACKED_TYPE_PRELOAD*)&wei_packed0));
+                wei_unpacked.s4567 = UNPACK_INT4(ACCUMULATOR_TYPE, *((INT4_PACKED_TYPE_PRELOAD*)&wei_packed1));
+                #else
+                SLM_FILTER_PACKED_VEC wei_packed = BLOCK_READN(FILTER_TYPE, FILTER_LOAD_BLOCK_SIZE/*4*/, weights, weights_idx);
                 SLM_FILTER_UNPACKED_VEC wei_unpacked = UNPACK_INT4(ACCUMULATOR_TYPE, *((INT4_PACKED_TYPE_PRELOAD*)&wei_packed));
+                #endif
                 ACCUMULATOR_TYPE* w = (ACCUMULATOR_TYPE*)(&wei_unpacked);
                 unroll_for(uint fi = 0; fi < TILE_OFM; ++fi) {
                     unroll_for(uint kii = 0; kii < FILTER_LOAD_BLOCK_SIZE; ++kii) {
@@ -396,8 +393,7 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
                 #endif
 
                 #undef STORE_TO_SLM
-
-                weights_idx += SIMD * FILTER_LOAD_BLOCK_SIZE;
+                weights_idx += SIMD * FILTER_ACTUAL_LOAD_BLOCK_SIZE;
             }
 
             wei_local_idx = sglid;
@@ -481,9 +477,9 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
                     #endif
 #else
                     #if TILE_OFM > 1
-                        ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi] += in_val * ((ACCUMULATOR_TYPE*)(&wei))[W_IDX];
+                        ((ACCUMULATOR_TYPE*)(&acc_tmp[bi]))[fi] += in_val * ((ACCUMULATOR_TYPE*)(&wei))[W_IDX];
                     #else
-                        acc[bi] += in_val * ((ACCUMULATOR_TYPE*)(&wei))[W_IDX];
+                        acc_tmp[bi] += in_val * ((ACCUMULATOR_TYPE*)(&wei))[W_IDX];
                     #endif
 #endif
                     }
@@ -491,6 +487,8 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
             }
             #if TILE_OFM == 1 && FILTER_LAYOUT_OS_IS_YX_OSV32_ISV2
             weights_offset += TILE_K_OFM_PACKED * 2 * SIMD;
+            #elif FILTER_LAYOUT_OS_IYX_OSV16 && TILE_OFM == 2 && USE_SLM == 1
+            weights_offset += TILE_K_OFM_PACKED / 2 * SIMD;
             #else
             weights_offset += TILE_K_OFM_PACKED * SIMD;
             #endif
@@ -535,6 +533,18 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
                 ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi] += ((ACCUMULATOR_TYPE*)(&acc_tmp[bi]))[fi] * ds;
                 #else
                 acc[bi] += acc_tmp[bi] * ds;
+                #endif
+            }
+        }
+#endif
+
+#if !DECOMPRESSION_SCALE_POST_OP
+        unroll_for (uint bi = 0; bi < TILE_B; ++bi) {
+            unroll_for(uint fi = 0; fi < TILE_OFM; ++fi) {
+                #if TILE_OFM > 1
+                ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi] += ((ACCUMULATOR_TYPE*)(&acc_tmp[bi]))[fi];
+                #else
+                acc[bi] += acc_tmp[bi];
                 #endif
             }
         }
@@ -855,7 +865,7 @@ inline void FUNC(fc_bf_tiled_kernel_dyn_quan)(
         // DECOMPRESSION_SCALE_POST_OP SHOULD be enabled for dynamic quantize FC : scale is ACCUMULATOR_VAL_ONE
         unroll_for(uint load_iter = 0; load_iter < FILTER_LOAD_ITERS; ++load_iter) {
             SLM_FILTER_PACKED_VEC wei_packed = BLOCK_READN(FILTER_TYPE, FILTER_LOAD_BLOCK_SIZE, weights, weights_idx);
-            DQ_SLM_FILTER_UNPACKED_VEC dq_wei_unpacked = UNPACK_TRANSPOSED_INT4(DQ_TYPE, *((uint4x8_t *)&wei_packed));
+            DQ_SLM_FILTER_UNPACKED_VEC dq_wei_unpacked = UNPACK_TRANSPOSED_INT4(DQ_TYPE, *((INT4_PACKED_TYPE_PRELOAD *)&wei_packed));
 
             // Calculate zero-point and scale only for DECOMPRESSION_SCALE_POST_OP enabled
             #if DECOMPRESSION_ZP_TERM

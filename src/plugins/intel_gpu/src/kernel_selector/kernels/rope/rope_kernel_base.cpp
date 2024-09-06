@@ -17,6 +17,8 @@ JitConstants RoPEKernelBase::GetJitConstants(const rope_params& params, RoPEKern
     jit.AddConstant(MakeJitConstant("ROTARY_NDIMS", params.rotary_ndims));
     jit.AddConstant(MakeJitConstant("HALF_ROTARY_NDIMS", params.rotary_ndims / 2));
     jit.AddConstant(MakeJitConstant("HEAD_COUNT", params.head_cnt));
+    // std::cout << "HEAD_COUNT: " << params.head_cnt << std::endl;
+    // std::cout << "HEAD_SIZE: " << params.head_size << std::endl;
 
     if (params.head_size > params.rotary_ndims) {
         jit.AddConstant(MakeJitConstant("ENABLE_IO_COPY", true));
@@ -61,6 +63,10 @@ JitConstants RoPEKernelBase::GetJitConstants(const rope_params& params, RoPEKern
         jit.AddConstant(MakeJitConstant("TRANSPOSED_INPUT0_Y_PITCH", "INPUT0_FEATURE_PITCH"));
         jit.AddConstant(MakeJitConstant("TRANSPOSED_INPUT0_FEATURE_PITCH", "INPUT0_Y_PITCH"));
         jit.AddConstant(MakeJitConstant("TRANSPOSED_INPUT0_BATCH_PITCH", "INPUT0_BATCH_PITCH"));
+    }
+
+    if (!params.is_chatglm && (params.inputs[1].has_dynamic_pad() || params.inputs[2].has_dynamic_pad())) {
+        jit.AddConstant(MakeJitConstant("SIN_COS_HAVE_DYNAMIC_PADDINGS", true));
     }
 
     if (params.is_qwen) {

@@ -3,11 +3,12 @@
 //
 
 #include "sync_tensor_inst.h"
-#include "implementation_map.hpp"
+#include "impls/registry/implementation_map.hpp"
 #include "register.hpp"
 #include "intel_gpu/runtime/error_handler.hpp"
 #include "openvino/core/parallel.hpp"
 #include "openvino/runtime/threading/cpu_message.hpp"
+#include "openvino/op/add.hpp"
 
 namespace cldnn {
 namespace cpu {
@@ -43,7 +44,6 @@ struct sync_tensor_impl : public typed_primitive_impl<sync_tensor> {
     event::ptr execute_impl(const std::vector<event::ptr>& events, sync_tensor_inst& instance) override {
         OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "sync_tensor::execute_impl");
         auto& stream = instance.get_network().get_stream();
-
         const bool pass_through_events = (stream.get_queue_type() == QueueTypes::out_of_order) && instance.get_node().is_in_shape_of_subgraph();
         if (!pass_through_events) {
             for (auto e : events) {
@@ -86,6 +86,29 @@ struct sync_tensor_impl : public typed_primitive_impl<sync_tensor> {
                 break;
             }
         }
+
+        if (instance.get_impl_params()->need_add) {
+            std::shared_ptr<ov::op::Op> op;
+            ov::TensorVector input_host_tensors;
+            ov::TensorVector output_host_tensors;
+            op = std::make_shared<ov::op::v1::Add>();
+            std::vector<memory::ptr> input_mem_ptrs;
+            for (size_t i = 0; i < instance.outputs_memory_count(); i++)
+                input_mem_ptrs.push_back(instance.output_memory_ptr(i));
+            auto output_mem_ptr = instance.output_memory_ptr();
+            cldnn::mem_lock<uint8_t, mem_lock_type::write> output_lock(output_mem_ptr, stream);
+            for (size_t i = 0; i < input_mem_ptrs.size(); i++)
+                input_host_tensors.push_back(
+                    make_tensor(instance.get_output_layout(), input_mem_ptrs[i]->lock(stream, mem_lock_type::read)));
+            output_host_tensors.push_back(make_tensor(instance.get_output_layout(), output_lock.data()));
+            OPENVINO_ASSERT(op->evaluate(output_host_tensors, input_host_tensors),
+                            "[GPU] Couldn't execute eltwise primitive with id ",
+                            instance.id());
+
+            for (size_t i = 0; i < input_mem_ptrs.size(); i++)
+                input_mem_ptrs[i]->unlock(stream);
+        }
+
         {
             std::lock_guard<std::mutex> lock(sub_mem_mgr->_flagMutex);
             sub_mem_mgr->_use_count[id]++;

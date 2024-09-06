@@ -378,20 +378,6 @@ void kernels_cache::build_batch(const engine& build_engine, const batch_program&
                     cl_kernel kern = k.get();
                     cl_context context = cl_build_engine.get_cl_context().get();
                     kernel::ptr kernel = kernels_factory::create(_engine, context, kern, entry_point);
-
-#ifdef GPU_DEBUG_CONFIG
-                    GPU_DEBUG_IF(cldnn::debug_configuration::get_instance()->check_kernels_properties >= 1) {
-                        auto kernel_properties = kernel->get_properties();
-
-                        if (kernel_properties.spill_mem_size > 0 || kernel_properties.private_mem_size > 0) {
-                            GPU_DEBUG_COUT << "WARNING: Detected extra private memory usage or spill for " << entry_point << " "
-                                           << "kernel with properties: " << kernel_properties.to_string() << "\n";
-                        } else {
-                            GPU_DEBUG_TRACE_DETAIL << "Create kernel " << entry_point << " with properties: " << kernel_properties.to_string() << "\n";
-                        }
-                    }
-#endif
-
                     auto& params = iter->second.first;
                     auto kernel_part_idx = iter->second.second;
                     if (compiled_kernels.find(params) != compiled_kernels.end()) {
@@ -447,7 +433,8 @@ void kernels_cache::build_batch(const engine& build_engine, const batch_program&
 kernel::ptr kernels_cache::get_kernel_from_cached_kernels(std::string id) const {
     auto res = _cached_kernels.find(id);
     OPENVINO_ASSERT(_cached_kernels.end() != res, "[GPU] Kernel " + id + " not found in the cached kernel cache!");
-    return res->second->clone();
+
+    return res->second->clone(_reuse_kernels);
 }
 
 std::vector<kernel::ptr> kernels_cache::get_kernels(kernel_impl_params params) const {
@@ -465,7 +452,7 @@ std::vector<kernel::ptr> kernels_cache::get_kernels(kernel_impl_params params) c
     for (auto& k : res->second) {
         auto& kernel_ptr = k.first;
         auto kernel_part_idx = k.second;
-        kernels[kernel_part_idx] = kernel_ptr->clone();
+        kernels[kernel_part_idx] = kernel_ptr->clone(_reuse_kernels);
     }
     return kernels;
 }
@@ -633,7 +620,7 @@ void kernels_cache::add_to_cached_kernels(const std::vector<kernel::ptr>& kernel
 }
 
 void kernels_cache::save(BinaryOutputBuffer& ob) const {
-    OPENVINO_ASSERT(_engine.type() == engine_types::ocl, "[GPU] Not supported engine type");
+    OPENVINO_ASSERT(_engine.type() == engine_types::ocl || _engine.type() == engine_types::sycl, "[GPU] Not supported engine type");
 
     ob << _cached_binaries.size();
     for (auto& cached_binary : _cached_binaries) {
@@ -643,7 +630,7 @@ void kernels_cache::save(BinaryOutputBuffer& ob) const {
 }
 
 void kernels_cache::load(BinaryInputBuffer& ib) {
-    OPENVINO_ASSERT(_engine.type() == engine_types::ocl, "[GPU] Not supported engine type");
+    OPENVINO_ASSERT(_engine.type() == engine_types::ocl || _engine.type() == engine_types::sycl, "[GPU] Not supported engine type");
 
     std::unordered_map<uint32_t, std::vector<unsigned char>> precompiled_kernels;
 
