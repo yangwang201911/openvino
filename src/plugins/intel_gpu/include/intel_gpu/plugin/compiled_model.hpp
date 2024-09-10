@@ -42,7 +42,6 @@ public:
     std::shared_ptr<ov::ISyncInferRequest> create_sync_infer_request() const override;
 
     void export_model(std::ostream& model) const override;
-    void export_model(std::ostream& model, std::size_t index) const;
 
     std::shared_ptr<const ov::Model> get_runtime_model() const override;
 

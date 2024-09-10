@@ -346,103 +346,57 @@ void CompiledModel::export_model(std::ostream& model) const {
 
     cldnn::BinaryOutputBuffer ob(model);
     ob << m_sub_compiled_models.size();
-    // Inputs
-    {
-        const auto& params = inputs();
-        ob << params.size();
 
-        for (const auto& param : params) {
-            std::stringstream ss;
-            ss << param.get_element_type();
+    auto export_inputs_outputs = [&]() {
+        // Inputs
+        {
+            const auto& params = inputs();
+            ob << params.size();
 
-            ob << param.get_node()->get_friendly_name();
-            ob << ss.str();
-            ob << param.get_partial_shape();
-            ob << param.get_names().size();
-            for (const auto& name : param.get_names()) {
-                ob << name;
+            for (const auto& param : params) {
+                std::stringstream ss;
+                ss << param.get_element_type();
+
+                ob << param.get_node()->get_friendly_name();
+                ob << ss.str();
+                ob << param.get_partial_shape();
+                ob << param.get_names().size();
+                for (const auto& name : param.get_names()) {
+                    ob << name;
+                }
             }
         }
-    }
 
-    // Outputs
-    {
-        const auto& results = outputs();
-        ob << results.size();
+        // Outputs
+        {
+            const auto& results = outputs();
+            ob << results.size();
 
-        for (const auto& param : results) {
-            std::stringstream ss;
-            ss << param.get_element_type();
+            for (const auto& param : results) {
+                std::stringstream ss;
+                ss << param.get_element_type();
 
-            ob << ss.str();
-            ob << param.get_partial_shape();
-            ob << param.get_node()->get_input_node_ptr(0)->get_friendly_name();
-            ob << param.get_node()->get_friendly_name();
-            ob << param.get_names().size();
-            for (const auto& name : param.get_names()) {
-                ob << name;
+                ob << ss.str();
+                ob << param.get_partial_shape();
+                ob << param.get_node()->get_input_node_ptr(0)->get_friendly_name();
+                ob << param.get_node()->get_friendly_name();
+                ob << param.get_names().size();
+                for (const auto& name : param.get_names()) {
+                    ob << name;
+                }
             }
         }
-    }
-    std::cout << "[" << __FILE__ << ":" << __LINE__ << "] [WY-DEBUG]: caching warp model!\n";
+    };
+    std::cout << "[" << __FILE__ << ":" << __LINE__ << "] [WY-DEBUG]: caching warp model...\n";
+    export_inputs_outputs();
     if (!m_has_sub_compiled_models)
         m_graphs[0]->export_model(ob);
 
     for (std::size_t index = 0; index < m_sub_compiled_models.size(); index++) {
         std::cout << "[" << __FILE__ << ":" << __LINE__ << "] [WY-DEBUG]: caching sub model: " << index << std::endl;
-        export_model(model, index);
+        export_inputs_outputs();
+        m_sub_compiled_models.at(index)->get_graph(0)->export_model(ob);
     }
-}
-
-void CompiledModel::export_model(std::ostream& model, std::size_t index) const {
-    // return m_sub_compiled_models.at(index)->export_model(model);
-    if (m_config.get_property(ov::cache_mode) == ov::CacheMode::OPTIMIZE_SIZE)
-        return;
-
-    OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "CompiledModel::export_model");
-    OPENVINO_ASSERT(!m_graphs.empty(), "[GPU] Model not loaded");
-
-    cldnn::BinaryOutputBuffer ob(model);
-
-    // Inputs
-    {
-        const auto& params = inputs();
-        ob << params.size();
-
-        for (const auto& param : params) {
-            std::stringstream ss;
-            ss << param.get_element_type();
-
-            ob << param.get_node()->get_friendly_name();
-            ob << ss.str();
-            ob << param.get_partial_shape();
-            ob << param.get_names().size();
-            for (const auto& name : param.get_names()) {
-                ob << name;
-            }
-        }
-    }
-
-    // Outputs
-    {
-        const auto& results = outputs();
-        ob << results.size();
-
-        for (const auto& param : results) {
-            std::stringstream ss;
-            ss << param.get_element_type();
-
-            ob << ss.str();
-            ob << param.get_partial_shape();
-            ob << param.get_node()->get_input_node_ptr(0)->get_friendly_name();
-            ob << param.get_node()->get_friendly_name();
-            ob << param.get_names().size();
-            for (const auto& name : param.get_names()) {
-                ob << name;
-            }
-        }
-    }
-    return m_sub_compiled_models.at(index)->get_graph(0)->export_model(ob);
 }
 
 CompiledModel::Ptr CompiledModel::get_tp_compiled_model() const {
