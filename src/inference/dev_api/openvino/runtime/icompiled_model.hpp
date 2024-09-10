@@ -105,20 +105,6 @@ public:
     virtual void export_model(std::ostream& model) const = 0;
 
     /**
-     * @brief Export compiled model to stream by index
-     *
-     * @param model output stream
-     */
-    virtual void export_model(std::ostream& model, std::size_t index) const;
-
-    /**
-     * @brief Returns number of compiled model
-     *
-     * @return number of compiled model for Tensor Parallel
-     */
-    virtual std::size_t get_runtime_models_numb() const;
-
-    /**
      * @brief Returns runtime model
      *
      * @return OpenVINO Model which represents runtime graph
@@ -158,8 +144,6 @@ private:
 
     std::shared_ptr<ov::threading::ITaskExecutor> m_task_executor = nullptr;      //!< Holds a task executor
     std::shared_ptr<ov::threading::ITaskExecutor> m_callback_executor = nullptr;  //!< Holds a callback executor
-
-    std::size_t m_numb_of_runtime_models = 1;
 
     friend ov::CoreImpl;
 

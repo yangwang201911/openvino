@@ -433,7 +433,6 @@ std::shared_ptr<ov::ICompiledModel> Plugin::import_model(std::istream& model,
                                                          const ov::SoPtr<ov::IRemoteContext>& context,
                                                          const ov::AnyMap& orig_config) const {
     OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "Plugin::ImportNetwork");
-    static std::shared_ptr<CompiledModel> imported_model = nullptr;
     auto context_impl = get_context_impl(context);
     auto device_id = ov::DeviceIDParser{context_impl->get_device_name()}.get_device_id();
 
@@ -452,12 +451,8 @@ std::shared_ptr<ov::ICompiledModel> Plugin::import_model(std::istream& model,
 
     if (config.get_property(ov::cache_mode) == ov::CacheMode::OPTIMIZE_SIZE)
         return nullptr;
-
     cldnn::BinaryInputBuffer ib(model, context_impl->get_engine());
-    std::string model_path;
-    auto compiled_model =
-        std::make_shared<CompiledModel>(ib, shared_from_this(), context_impl, config, loaded_from_cache);
-    return compiled_model;
+    return std::make_shared<CompiledModel>(ib, shared_from_this(), context_impl, config, loaded_from_cache);
 }
 
 ov::Any Plugin::get_property(const std::string& name, const ov::AnyMap& options) const {

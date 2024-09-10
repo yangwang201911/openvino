@@ -288,35 +288,6 @@ CompiledModel::CompiledModel(cldnn::BinaryInputBuffer& ib,
                                                             {},
                                                             configs_for_tp[i].streamsRankTable[i]};
                 configs_for_tp[i].subStreamExecConfig = std::move(streamExecutorConfig);
-                //auto model_clone = model->clone();
-                //ov::pass::Manager manager;
-                // bool has_pa_op = false;
-                // std::set<std::string> kvcache_op;
-                // for (const auto& op : model_clone->get_ops()) {
-                //     if (std::dynamic_pointer_cast<ov::op::PagedAttentionExtension>(op)) {
-                //         has_pa_op = true;
-                //         kvcache_op.insert(op->inputs()[3].get_source_output().get_node_shared_ptr()->get_friendly_name());
-                //         kvcache_op.insert(op->inputs()[4].get_source_output().get_node_shared_ptr()->get_friendly_name());
-                //     }
-                // }
-
-                // if (has_pa_op) {
-                //     std::map<size_t, ov::PartialShape> shapes;
-                //     const auto& params = model_clone->get_parameters();
-                //     for (size_t input_id = 0; input_id < params.size(); input_id++) {
-                //         const auto& param = params[input_id];
-                //         shapes[input_id] = param->get_output_partial_shape(0);
-                //         if (kvcache_op.count(param->get_friendly_name())) {
-                //             auto heads_num = shapes[input_id][1];
-                //             shapes[input_id][1] = heads_num / config.get_context_for_tp().size();
-                //         }
-                //     }
-                //     model_clone->reshape(shapes);
-                //     manager.register_pass<ov::intel_gpu::PATensorParallelFusion>(config.get_context_for_tp().size(),
-                //     i);
-                // }
-                // manager.register_pass<ov::intel_gpu::RemainFCParallelFusion>(config.get_context_for_tp().size(), i);
-                // manager.run_passes(model_clone);
                 m_sub_compiled_models.push_back(
                     std::make_shared<CompiledModel>(ib,
                                                     plugin,
@@ -481,10 +452,6 @@ CompiledModel::Ptr CompiledModel::get_tp_compiled_model() const {
             return std::dynamic_pointer_cast<CompiledModel>(iter);
     }
     return nullptr;
-}
-
-void CompiledModel::insert_tp_compiled_model(CompiledModel::Ptr& compiled_model) {
-    m_sub_compiled_models.push_back(compiled_model);
 }
 
 std::shared_ptr<const ov::Model> CompiledModel::get_runtime_model() const {
