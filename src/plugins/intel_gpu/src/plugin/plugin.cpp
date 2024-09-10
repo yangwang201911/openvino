@@ -454,13 +454,9 @@ std::shared_ptr<ov::ICompiledModel> Plugin::import_model(std::istream& model,
         return nullptr;
 
     cldnn::BinaryInputBuffer ib(model, context_impl->get_engine());
+    std::string model_path;
     auto compiled_model =
         std::make_shared<CompiledModel>(ib, shared_from_this(), context_impl, config, loaded_from_cache);
-    if (imported_model) {
-        imported_model->insert_tp_compiled_model(compiled_model);
-    } else {
-        imported_model = compiled_model;
-    }
     return compiled_model;
 }
 

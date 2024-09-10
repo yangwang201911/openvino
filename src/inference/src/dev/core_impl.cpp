@@ -744,6 +744,7 @@ ov::SoPtr<ov::ICompiledModel> ov::CoreImpl::compile_model(const std::shared_ptr<
     if (cacheManager && device_supports_model_caching(plugin) && !is_proxy_device(plugin)) {
         CacheContent cacheContent{cacheManager};
         cacheContent.blobId = ov::ModelCache::compute_hash(model, create_compile_config(plugin, parsed._config));
+        std::cout << "*[WY-DEBUG] Hash ID of caching compiled model is " << cacheContent.blobId << std::endl;
         std::unique_ptr<CacheGuardEntry> lock = cacheGuard.get_hash_lock(cacheContent.blobId);
         res = load_model_from_cache(cacheContent, plugin, parsed._config, ov::SoPtr<ov::IRemoteContext>{}, [&]() {
             return compile_model_and_cache(plugin,
@@ -1382,35 +1383,14 @@ ov::SoPtr<ov::ICompiledModel> ov::CoreImpl::compile_model_and_cache(ov::Plugin& 
                 compiled_model_runtime_properties =
                     plugin.get_property(ov::internal::compiled_model_runtime_properties.name(), {}).as<std::string>();
             }
-
-            try {
-                cacheContent.cacheManager->write_cache_entry(cacheContent.blobId, [&](std::ostream& networkStream) {
-                    networkStream << ov::CompiledBlobHeader(ov::get_openvino_version().buildNumber,
-                                                            ov::ModelCache::calculate_file_info(cacheContent.modelPath),
-                                                            compiled_model_runtime_properties);
-                    compiled_model->export_model(networkStream);
-                });
-            } catch (...) {
-                cacheContent.cacheManager->remove_cache_entry(cacheContent.blobId);
-            }
-
-            auto numb_compiled_models = compiled_model->get_runtime_models_numb();
-            for (std::size_t index = 0; (numb_compiled_models > 1 && index < numb_compiled_models); index++) {
-                auto blobID = cacheContent.blobId + "/" + std::to_string(index);
-                try {
-                    cacheContent.cacheManager->write_cache_entry(blobID, [&](std::ostream& networkStream) {
-                        networkStream << ov::CompiledBlobHeader(
-                            ov::get_openvino_version().buildNumber,
-                            ov::ModelCache::calculate_file_info(cacheContent.modelPath),
-                            compiled_model_runtime_properties);
-                        return compiled_model->export_model(networkStream, index);
-                    });
-                } catch (...) {
-                    cacheContent.cacheManager->remove_cache_entry(blobID);
-                    throw;
-                }
-            }
+            cacheContent.cacheManager->write_cache_entry(cacheContent.blobId, [&](std::ostream& networkStream) {
+                networkStream << ov::CompiledBlobHeader(ov::get_openvino_version().buildNumber,
+                                                        ov::ModelCache::calculate_file_info(cacheContent.modelPath),
+                                                        compiled_model_runtime_properties);
+                compiled_model->export_model(networkStream);
+            });
         } catch (...) {
+            cacheContent.cacheManager->remove_cache_entry(cacheContent.blobId);
             throw;
         }
     }
@@ -1425,7 +1405,6 @@ ov::SoPtr<ov::ICompiledModel> ov::CoreImpl::load_model_from_cache(
     std::function<ov::SoPtr<ov::ICompiledModel>()> compile_model_lambda) {
     ov::SoPtr<ov::ICompiledModel> compiled_model;
     struct HeaderException {};
-    bool is_first_time = true;
 
     OPENVINO_ASSERT(cacheContent.cacheManager != nullptr);
     try {
@@ -1462,16 +1441,8 @@ ov::SoPtr<ov::ICompiledModel> ov::CoreImpl::load_model_from_cache(
 
             ov::AnyMap update_config = config;
             update_config[ov::loaded_from_cache.name()] = true;
-            if (is_first_time) {
-                is_first_time = false;
-                compiled_model = context ? plugin.import_model(networkStream, context, update_config)
-                                         : plugin.import_model(networkStream, update_config);
-            } else {
-                if (context)
-                    plugin.import_model(networkStream, context, update_config);
-                else
-                    plugin.import_model(networkStream, update_config);
-            }
+            compiled_model = context ? plugin.import_model(networkStream, context, update_config)
+                                     : plugin.import_model(networkStream, update_config);
         });
     } catch (const HeaderException&) {
         // For these exceptions just remove old cache and set that import didn't work
