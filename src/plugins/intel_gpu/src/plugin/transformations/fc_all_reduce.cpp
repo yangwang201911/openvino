@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#include "remaining_fc_parallel.hpp"
+#include "fc_all_reduce.hpp"
 #include "intel_gpu/op/fully_connected.hpp"
 #include "intel_gpu/op/fully_connected_compressed.hpp"
 #include <memory>
@@ -28,14 +28,18 @@
 #include "openvino/op/slice.hpp"
 #include "openvino/op/reshape.hpp"
 #include "openvino/op/add.hpp"
+#include "openvino/op/transpose.hpp"
+#include "openvino/op/gather.hpp"
 namespace ov {
 namespace intel_gpu {
-RemainFCParallelFusion::RemainFCParallelFusion(size_t world_size, size_t world_rank) {
-    using namespace ov::pass::pattern;
+
+FCALLReduce::FCALLReduce(size_t world_size, size_t world_rank) {
+   using namespace ov::pass::pattern;
+
     auto data = any_input();
     auto weights = any_input();
     auto bias = any_input();
-    auto fully_connected = wrap_type<op::FullyConnected>({data, weights, bias});
+    auto fully_connected = wrap_type<op::FullyConnected>({data, weights, bias}, consumers_count(1));
     auto fully_connected_compressed = wrap_type<op::FullyConnectedCompressed>({data, weights, bias, any_input()});
     auto fully_connected_compressed_with_zp = wrap_type<op::FullyConnectedCompressed>({data, weights, bias, any_input(), any_input()});
     auto fully_connected_m = std::make_shared<ov::pass::pattern::op::Or>(OutputVector{fully_connected,
@@ -44,15 +48,16 @@ RemainFCParallelFusion::RemainFCParallelFusion(size_t world_size, size_t world_r
 
     ov::matcher_pass_callback callback = [=](ov::pass::pattern::Matcher& m) {
         const auto& pattern_map = m.get_pattern_value_map();
+
         OPENVINO_ASSERT(pattern_map.count(fully_connected_compressed_with_zp) ||
                         pattern_map.count(fully_connected_compressed) || pattern_map.count(fully_connected));
+
         std::shared_ptr<Node> m_fc = nullptr;
-        std::shared_ptr<Node> m_pa = nullptr;
         if (pattern_map.find(fully_connected) != pattern_map.end()) {
             m_fc = pattern_map.at(fully_connected).get_node_shared_ptr();
         } else if (pattern_map.find(fully_connected_compressed) != pattern_map.end()) {
             m_fc = pattern_map.at(fully_connected_compressed).get_node_shared_ptr();
-        } else if (pattern_map.find(fully_connected_compressed_with_zp) != pattern_map.end()) {
+        } else {
             m_fc = pattern_map.at(fully_connected_compressed_with_zp).get_node_shared_ptr();
         }
 
@@ -79,7 +84,22 @@ RemainFCParallelFusion::RemainFCParallelFusion(size_t world_size, size_t world_r
             split_dim_range = reshaped_pshape.to_shape()[split_axis];
             {
                 // transform to rank constant
+                std::cout << "m_data: " << m_data->get_shape() << std::endl;
+                std::cout << "weight_node: " << weight_node->get_shape() << std::endl;
+
+                int slice_axis_length = m_data->get_output_partial_shape(0)[-1].get_length();
+                auto scop = std::div(slice_axis_length, world_size).quot;
+                auto start = ov::op::v0::Constant::create(ov::element::i32, ov::Shape{1}, {world_rank * scop});
+                auto stop = ov::op::v0::Constant::create(ov::element::i32, ov::Shape{1}, {(world_rank + 1) * scop});
+                auto step = ov::op::v0::Constant::create(ov::element::i32, ov::Shape{1}, {1});
+                int64_t input_axis_value = m_data->get_output_partial_shape(0).size() - 1;
+                auto input_axis = ov::op::v0::Constant::create(ov::element::i32, ov::Shape{1}, {input_axis_value});
+                auto data_slice = std::make_shared<ov::op::v8::Slice>(m_data, start, stop, step, input_axis);
+
+                // auto ranked_data = std::make_shared<ov::intel_gpu::op::RankConstant>(m_data, world_size, world_rank, tp_mode);
                 auto ranked_weight = std::make_shared<ov::intel_gpu::op::RankConstant>(weight_node, world_size, world_rank, tp_mode);
+                std::cout << "data_slice: " << data_slice->get_shape() << std::endl;
+                std::cout << "ranked_weight: " << ranked_weight->get_shape() << std::endl;
                 std::shared_ptr<ov::Node> ranked_bias, ranked_scale, ranked_zp;
                 if (!std::dynamic_pointer_cast<op::Placeholder>(m_bias)) {
                     ranked_bias = std::make_shared<ov::intel_gpu::op::RankConstant>(m_bias, world_size, world_rank, tp_mode);
@@ -110,7 +130,7 @@ RemainFCParallelFusion::RemainFCParallelFusion(size_t world_size, size_t world_r
                         }
                     }
                 }
-                auto output_type = m_fc->get_output_element_type(0);
+                auto output_type = org_fc->get_output_element_type(0);
                 if (compressed_fc) {
                     if (compressed_fc->inputs().size() > 4)
                         splitted_fc = std::make_shared<op::FullyConnectedCompressed>(
@@ -129,7 +149,7 @@ RemainFCParallelFusion::RemainFCParallelFusion(size_t world_size, size_t world_r
                             output_type);
 
                 } else {
-                    splitted_fc = std::make_shared<op::FullyConnected>(m_data,
+                    splitted_fc = std::make_shared<op::FullyConnected>(data_slice,
                                                                 ranked_weight,
                                                                 ranked_bias ? ranked_bias : m_bias,
                                                                 output_type);
@@ -138,91 +158,35 @@ RemainFCParallelFusion::RemainFCParallelFusion(size_t world_size, size_t world_r
                 return {splitted_fc, split_dim_range};
             }
         };
-        {
-            if (m_fc->get_rt_info().find("splitted") != m_fc->get_rt_info().end()) {
-                if (m_fc->get_rt_info()["splitted"].as<bool>()) {
-                    return false;
-                }
-            }
-#if 1
-            // some accuracy lost, disable for now
-            if (m_fc->get_friendly_name().find("mlp.down_proj") != std::string::npos)
-                return false;
-#endif
-            auto splitted_context = split_fc(m_fc, op::TP_MODE::ALL_GATHERH);
-            auto new_fc = splitted_context.first;
-            new_fc->set_friendly_name(m_fc->get_friendly_name());
-            copy_runtime_info(m_fc, new_fc);
-            replace_node(m_fc, new_fc);
-
-            if (new_fc->get_users().size() == 1) {
-                for (auto& iter : new_fc->get_users()) {
-                    if (ov::is_type<ov::op::v1::Multiply>(iter))
-                        return true;
-                }
-            }
-            std::shared_ptr<ov::op::v4::Swish> activation;
-            std::shared_ptr<ov::op::v1::Multiply> eltwise_node;
-            //bool elwise_flag = false;
-            for (auto& iter : new_fc->get_users()) {
-                if (ov::is_type<ov::op::v4::Swish>(iter)) {
-                    activation = std::dynamic_pointer_cast<ov::op::v4::Swish>(iter);
-                    if (activation->get_users().size() == 1) {
-                        for (auto& iter2 : activation->get_users())
-                            if (ov::is_type<ov::op::v1::Multiply>(iter2))
-                                eltwise_node = std::dynamic_pointer_cast<ov::op::v1::Multiply>(iter2);
-                    }
-                }
-            }
-            {
+        if (m_fc) {
                 std::map<int, std::shared_ptr<ov::Node>> org_users;
-                auto node_to_operate = eltwise_node ? eltwise_node : activation ? activation : new_fc;
-                for (auto u : node_to_operate->get_users()) {
+                for (auto u : m_fc->get_users()) {
                     for (size_t idx = 0; idx < u->inputs().size(); ++idx) {
-                        if (u->get_input_node_shared_ptr(idx) == node_to_operate) {
+                        if (u->get_input_node_shared_ptr(idx) == m_fc) {
                             org_users.insert({idx, u});
                         }
                     }
                 }
+                auto new_fc = split_fc(m_fc, op::TP_MODE::ALL_REDUCE).first;
+                new_fc->get_rt_info().insert({"splitted", true});
                 std::shared_ptr<ov::intel_gpu::op::SyncTensor> sync_node;
-                sync_node = std::make_shared<ov::intel_gpu::op::SyncTensor>(node_to_operate, world_size, splitted_context.second,
-                                                                           new_fc->get_element_type());
-                // std::cout << "node to operate: " << node_to_operate->get_friendly_name() << std::endl;
-                sync_node->set_friendly_name(new_fc->get_friendly_name()+ "_TP_remain");
-                // std::cout << "related syn tensor: " << sync_node->get_friendly_name() << std::endl;
-
-#if 1
-                // auto concat_node = std::make_shared<ov::op::v0::Concat>(sync_node->outputs(), -1);
-                // concat_node->set_friendly_name(new_fc->get_friendly_name()+ "_ALLGATHER");
-                copy_runtime_info(new_fc, sync_node);
+                sync_node = std::make_shared<ov::intel_gpu::op::SyncTensor>(
+                    new_fc,
+                    world_size,
+                    m_fc->get_input_node_shared_ptr(1)->get_shape()[-1],
+                    m_fc->get_element_type(),
+                    ov::intel_gpu::op::TP_MODE::ALL_REDUCE);
+                sync_node->set_friendly_name(m_fc->get_friendly_name() + "_TP");
+                copy_runtime_info(m_fc, new_fc);
                 for (auto& iter : org_users) {
-                    // std::cout << "RemainFCParallelFusion: rank[" << world_rank << "], world_size = " << world_size
-                    //           << std::endl;
-                    iter.second->input(iter.first).replace_source_output(sync_node->output(0));
-                    // std::cout << "changing input shape of user:" << iter.second->get_friendly_name()
-                    //           << "to: " << sync_node->output(world_size).get_partial_shape().to_string() <<
-                    //           std::endl;
+                    iter.second->input(iter.first).replace_source_output(sync_node->output(world_rank));
                 }
-                // ov::replace_node(node_to_operate, sync_node);
-#else
-                ov::OutputVector sync_node_output;
-                for (size_t i = 0; i < world_size; i++)
-                    sync_node_output.emplace_back(sync_node->output(i));
-                auto concat_node = std::make_shared<ov::op::v0::Concat>(sync_node_output, -1);
-                // auto concat_node = std::make_shared<ov::op::v0::Concat>(sync_node->outputs(), -1);
-                concat_node->set_friendly_name(new_fc->get_friendly_name() + "_ALLGATHER_concat");
-                copy_runtime_info(new_fc, concat_node);
-                for (auto& iter : org_users) {
-                    iter.second->input(iter.first).replace_source_output(concat_node->output(0));
-                }
-#endif
-                new_fc->clear_control_dependencies();
+                m_fc->clear_control_dependencies();
             }
-        }
         return true;
     };
 
-    auto m = std::make_shared<ov::pass::pattern::Matcher>(fully_connected_m, "FullyConnectedRemainFCParallelFusion");
+    auto m = std::make_shared<ov::pass::pattern::Matcher>(fully_connected_m, "FCALLReduce");
     this->register_matcher(m, callback);
 }
 }  // namespace intel_gpu
