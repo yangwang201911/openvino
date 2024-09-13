@@ -129,6 +129,10 @@ CompiledModel::CompiledModel(std::shared_ptr<ov::Model> model,
                 }
                 manager.register_pass<ov::intel_gpu::RemainFCParallelFusion>(config.get_context_for_tp().size(), i);
                 manager.run_passes(model_clone);
+                std::cout << "===========================\n";
+                std::cout << "[compiled] context name: " << m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>()->get_device_name() << std::endl;
+                std::cout << "[compiled] context engine: " << &(m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>()->get_engine()) << std::endl;
+                std::cout << "===========================\n";
                 m_sub_compiled_models.push_back(std::make_shared<CompiledModel>(
                     model_clone, plugin, m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>(), configs_for_tp[i], m_sub_memory_manager));
                 GPU_DEBUG_TRACE_DETAIL << "sub models for TP created, rank " << configs_for_tp[i].streamsRankTable[i][0] << std::endl;
@@ -157,12 +161,6 @@ CompiledModel::CompiledModel(cldnn::BinaryInputBuffer& ib,
           ov::threading::IStreamsExecutor::Config{"Intel GPU plugin wait executor"})),
       m_model_name(""),
       m_loaded_from_cache(loaded_from_cache) {
-    std::size_t num_sub_compiled_models = 0;
-    if (!sub_memory_manager) {
-        ib >> num_sub_compiled_models;
-        std::cout << "[" << __FILE__ << ":" << __LINE__
-            << "] [WY-DEBUG]: Number of sub compiled models: " << num_sub_compiled_models << std::endl;
-    }
     {
         size_t num_params;
         ib >> num_params;
@@ -236,33 +234,16 @@ CompiledModel::CompiledModel(cldnn::BinaryInputBuffer& ib,
         }
     }
 
+    // TODO: import original compiled model without TP
     std::shared_ptr<Graph> graph_base =
-        num_sub_compiled_models > 1 ? nullptr : std::make_shared<Graph>(ib, context, m_config, 0, sub_memory_manager);
-    auto get_rank_table = [&]() {
-        std::vector<std::vector<int>> rank_table = {};
-        for (size_t i = 0; i < num_sub_compiled_models; i++) {
-            std::vector<int> init_rank = {};
-            init_rank.emplace_back(i);
-            rank_table.emplace_back(init_rank);
-        }
-        return rank_table;
-    };
-    // for (auto& device_id : devices_id_for_tp) {
-    //     config.register_device_context_for_tp(get_default_context(device_id));
-    //     contexts_for_tp.insert({device_id, get_default_context(device_id)});
-    //     std::cout << "Registered device with id GPU." << device_id << " for TP." << std::endl;
-    // }
-    if (num_sub_compiled_models > 1) {
-        for (std::size_t id = 0; id < num_sub_compiled_models; id++) {
-            auto device_id = std::to_string(id + 1);
-            m_config.register_device_context_for_tp(context);
-            std::cout << "Registered device with id GPU." << device_id << " for TP." << std::endl;
-        }
-        m_config.enableSubStreams = true;
-        m_config.streamsRankTable = get_rank_table();
-        m_graphs.push_back(graph_base);
+        m_config.enableSubStreams ? nullptr : std::make_shared<Graph>(ib, m_context, m_config, 0, sub_memory_manager);
+    for (uint16_t n = 0; n < m_config.get_property(ov::num_streams); n++) {
+        auto graph = n == 0 ? graph_base : std::make_shared<Graph>(graph_base, n);
+        m_graphs.push_back(graph);
+    }
+    if (m_config.enableSubStreams) {
         std::vector<ExecutionConfig> configs_for_tp;
-        configs_for_tp.resize(num_sub_compiled_models);
+        configs_for_tp.resize(m_config.get_context_for_tp().size());
         m_has_sub_compiled_models = true;
         auto message = ov::threading::message_manager();
         auto tp_compile_executor =
@@ -270,11 +251,12 @@ CompiledModel::CompiledModel(cldnn::BinaryInputBuffer& ib,
                 "async compile executor for TP",
                 static_cast<int>(std::thread::hardware_concurrency()) /* max possible #streams*/,
                 0});
-        m_sub_memory_manager = std::make_shared<SubMemoryManager>(num_sub_compiled_models);
-        message->set_num_sub_streams(num_sub_compiled_models);
+        m_sub_memory_manager = std::make_shared<SubMemoryManager>(m_config.get_context_for_tp().size());
+        message->set_num_sub_streams(m_config.get_context_for_tp().size());
         std::vector<std::shared_ptr<ov::ICompiledModel>> sub_models;
         std::vector<ov::threading::Task> sub_tasks;
-        for (size_t i = 0; i < num_sub_compiled_models; i++) {
+        context = m_config.get_context_for_tp()[1].as<RemoteContextImpl::Ptr>();
+        for (std::size_t i = 0; i < m_config.get_context_for_tp().size(); i++) {
             auto compile_tp_model = [&](size_t i) {
                 configs_for_tp[i] = m_config;
                 configs_for_tp[i].enableSubStreams = false;
@@ -288,10 +270,26 @@ CompiledModel::CompiledModel(cldnn::BinaryInputBuffer& ib,
                                                             {},
                                                             configs_for_tp[i].streamsRankTable[i]};
                 configs_for_tp[i].subStreamExecConfig = std::move(streamExecutorConfig);
+                std::cout << "===========================\n";
+                std::cout << "[import] context name: "
+                          << m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>()->get_device_name()
+                          << std::endl;
+                std::cout << "[import] context engine: "
+                          << &(m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>()->get_engine())
+                          << std::endl;
+                std::cout << "[import] context UUID: "
+                          << m_config.get_context_for_tp()[i]
+                                 .as<RemoteContextImpl::Ptr>()
+                                 ->get_engine()
+                                 .get_device_info()
+                                 .uuid
+                          << std::endl;
+                std::cout << "===========================\n";
                 m_sub_compiled_models.push_back(
                     std::make_shared<CompiledModel>(ib,
                                                     plugin,
                                                     m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>(),
+                                                    //m_context,
                                                     configs_for_tp[i],
                                                     loaded_from_cache,
                                                     m_sub_memory_manager));
@@ -308,11 +306,6 @@ CompiledModel::CompiledModel(cldnn::BinaryInputBuffer& ib,
         // clear up the tp executor for async compile
         get_plugin()->get_executor_manager()->clear("async compile executor for TP");
         tp_compile_executor.reset();
-    } else {
-        for (uint16_t n = 0; n < m_config.get_property(ov::num_streams); n++) {
-            auto graph = n == 0 ? graph_base : std::make_shared<Graph>(graph_base, n);
-            m_graphs.push_back(graph);
-        }
     }
 }
 
@@ -326,6 +319,10 @@ std::shared_ptr<ov::IAsyncInferRequest> CompiledModel::create_infer_request() co
         std::vector<std::shared_ptr<IAsyncInferRequest>> requests;
         for (auto model : m_sub_compiled_models) {
             requests.push_back(model->create_infer_request());
+            std::cout << "\n*[WY-DEBUG]: create sub infer request: " << requests.back().get()
+                      << "\t on engine info: " << &(model->get_context_impl()->get_engine().get_device_info())
+                      << " from device: " << model->get_context_impl()->get_device_name() << std::endl;
+            std::cout << "\n";
         }
         async_infer_request->setSubInferRequest(requests);
         async_infer_request->setSubInfer(true);
@@ -346,6 +343,15 @@ void CompiledModel::export_model(std::ostream& model) const {
 
     cldnn::BinaryOutputBuffer ob(model);
     ob << m_sub_compiled_models.size();
+    for (const auto& sub_compiled_model : m_sub_compiled_models) {
+        auto device_name = sub_compiled_model->get_context()->get_device_name();
+        auto dotPos = device_name.find(".");
+        if (dotPos != std::string::npos) {
+            auto device_id = device_name.substr(dotPos + 1);
+            ob << device_id;
+            std::cout << "*[WY-DEBUG]: will cache device: " << device_name << "\t with id: " << device_id << std::endl;
+        }
+    }
 
     auto export_inputs_outputs = [&]() {
         // Inputs
@@ -393,7 +399,8 @@ void CompiledModel::export_model(std::ostream& model) const {
         m_graphs[0]->export_model(ob);
 
     for (std::size_t index = 0; index < m_sub_compiled_models.size(); index++) {
-        std::cout << "[" << __FILE__ << ":" << __LINE__ << "] [WY-DEBUG]: caching sub model: " << index << std::endl;
+        std::cout << "[" << __FILE__ << ":" << __LINE__ << "] [WY-DEBUG]: caching sub model for: "
+                  << m_sub_compiled_models.at(index)->get_context()->get_device_name() << std::endl;
         export_inputs_outputs();
         m_sub_compiled_models.at(index)->get_graph(0)->export_model(ob);
     }
