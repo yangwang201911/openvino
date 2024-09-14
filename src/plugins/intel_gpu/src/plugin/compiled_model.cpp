@@ -234,6 +234,8 @@ CompiledModel::CompiledModel(cldnn::BinaryInputBuffer& ib,
         }
     }
 
+    std::cout << "******[WY-DEBUG] Enable substreams: " << m_config.enableSubStreams << " *********\n";
+    std::cout << "******[WY-DEBUG] context size: " << m_config.get_context_for_tp().size() << " *********\n";
     // TODO: import original compiled model without TP
     std::shared_ptr<Graph> graph_base =
         m_config.enableSubStreams ? nullptr : std::make_shared<Graph>(ib, m_context, m_config, 0, sub_memory_manager);
@@ -255,7 +257,6 @@ CompiledModel::CompiledModel(cldnn::BinaryInputBuffer& ib,
         message->set_num_sub_streams(m_config.get_context_for_tp().size());
         std::vector<std::shared_ptr<ov::ICompiledModel>> sub_models;
         std::vector<ov::threading::Task> sub_tasks;
-        context = m_config.get_context_for_tp()[1].as<RemoteContextImpl::Ptr>();
         for (std::size_t i = 0; i < m_config.get_context_for_tp().size(); i++) {
             auto compile_tp_model = [&](size_t i) {
                 configs_for_tp[i] = m_config;

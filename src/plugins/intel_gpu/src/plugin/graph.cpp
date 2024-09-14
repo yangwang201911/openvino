@@ -65,6 +65,7 @@ Graph::Graph(cldnn::BinaryInputBuffer& ib,
       m_stream_id(stream_id) {
     bool need_onednn_engine = false;
     ib >> need_onednn_engine;
+    std::cout << "11111111111111\n";
     if (need_onednn_engine) {
 #ifdef ENABLE_ONEDNN_FOR_GPU
         get_engine().create_onednn_engine(config);
@@ -78,6 +79,7 @@ Graph::Graph(cldnn::BinaryInputBuffer& ib,
     ib >> inputPrimitiveIDs;
     ib >> prevPrimitiveIDs;
     ib >> profilingIDs;
+    std::cout << "2222222222222\n";
     {
         size_t perfMap_size;
         ib >> perfMap_size;
@@ -104,8 +106,10 @@ Graph::Graph(cldnn::BinaryInputBuffer& ib,
     }
 
     auto imported_prog = std::make_shared<cldnn::program>(get_engine(), m_config);
+    std::cout << "33333333333333333-m_config.enableSubStreams: " << m_config.enableSubStreams << "\n";
     if (!m_config.enableSubStreams) {
         imported_prog->load(ib);
+        std::cout << "44444444444444444" << "\n";
         m_sub_memory_manager = sub_memory_manager;
         build(imported_prog);
     }
