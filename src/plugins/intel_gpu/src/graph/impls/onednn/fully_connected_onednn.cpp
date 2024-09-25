@@ -258,6 +258,7 @@ public:
 
         std::vector<uint8_t> prim_cache;
         prim_cache = _prim.get_cache_blob();
+        std::cout << "[export] save prim cache size: " << prim_cache.size() << std::endl;
         ob << prim_cache;
 #endif
     }
@@ -330,6 +331,8 @@ public:
         std::vector<uint8_t> prim_cache;
         ib >> prim_cache;
 
+        std::cout << "[import] loaded prim cache size: " << prim_cache.size()
+                  << "[import] ib engine uuid: " << ib.get_engine().get_device_info().uuid << std::endl;
         _scratchpad_md = _pd.scratchpad_desc();
 
         _prim = dnnl::primitive(_pd, prim_cache);

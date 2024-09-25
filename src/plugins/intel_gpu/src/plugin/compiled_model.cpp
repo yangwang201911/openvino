@@ -92,6 +92,7 @@ CompiledModel::CompiledModel(std::shared_ptr<ov::Model> model,
             auto compile_tp_model = [&](size_t i) {
                 configs_for_tp[i] = m_config;
                 configs_for_tp[i].enableSubStreams = false;
+                configs_for_tp[i].set_property(ov::cache_dir(""));
                 auto streamExecutorConfig = ov::threading::IStreamsExecutor::Config{"GPUStreamsExecutor",
                                                                  1,
                                                                  0,
@@ -129,10 +130,6 @@ CompiledModel::CompiledModel(std::shared_ptr<ov::Model> model,
                 }
                 manager.register_pass<ov::intel_gpu::RemainFCParallelFusion>(config.get_context_for_tp().size(), i);
                 manager.run_passes(model_clone);
-                std::cout << "===========================\n";
-                std::cout << "[compiled] context name: " << m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>()->get_device_name() << std::endl;
-                std::cout << "[compiled] context engine: " << &(m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>()->get_engine()) << std::endl;
-                std::cout << "===========================\n";
                 m_sub_compiled_models.push_back(std::make_shared<CompiledModel>(
                     model_clone, plugin, m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>(), configs_for_tp[i], m_sub_memory_manager));
                 GPU_DEBUG_TRACE_DETAIL << "sub models for TP created, rank " << configs_for_tp[i].streamsRankTable[i][0] << std::endl;
@@ -234,8 +231,6 @@ CompiledModel::CompiledModel(cldnn::BinaryInputBuffer& ib,
         }
     }
 
-    std::cout << "******[WY-DEBUG] Enable substreams: " << m_config.enableSubStreams << " *********\n";
-    std::cout << "******[WY-DEBUG] context size: " << m_config.get_context_for_tp().size() << " *********\n";
     // TODO: import original compiled model without TP
     std::shared_ptr<Graph> graph_base =
         m_config.enableSubStreams ? nullptr : std::make_shared<Graph>(ib, m_context, m_config, 0, sub_memory_manager);
@@ -261,6 +256,7 @@ CompiledModel::CompiledModel(cldnn::BinaryInputBuffer& ib,
             auto compile_tp_model = [&](size_t i) {
                 configs_for_tp[i] = m_config;
                 configs_for_tp[i].enableSubStreams = false;
+                configs_for_tp[i].set_user_property(ov::cache_dir(""));
                 auto streamExecutorConfig =
                     ov::threading::IStreamsExecutor::Config{"GPUStreamsExecutor",
                                                             1,
@@ -271,33 +267,34 @@ CompiledModel::CompiledModel(cldnn::BinaryInputBuffer& ib,
                                                             {},
                                                             configs_for_tp[i].streamsRankTable[i]};
                 configs_for_tp[i].subStreamExecConfig = std::move(streamExecutorConfig);
+                cldnn::BinaryInputBuffer sub_ib(
+                    ib.get_stream(),
+                    m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>()->get_engine());
                 std::cout << "===========================\n";
                 std::cout << "[import] context name: "
                           << m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>()->get_device_name()
                           << std::endl;
-                std::cout << "[import] context engine: "
-                          << &(m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>()->get_engine())
-                          << std::endl;
-                std::cout << "[import] context UUID: "
+                std::cout << "[import] context engine uuid: "
                           << m_config.get_context_for_tp()[i]
                                  .as<RemoteContextImpl::Ptr>()
                                  ->get_engine()
                                  .get_device_info()
                                  .uuid
                           << std::endl;
-                std::cout << "===========================\n";
+                std::cout << "[import] sub blob stream engine uuid: " << sub_ib.get_engine().get_device_info().uuid
+                          << std::endl;
                 m_sub_compiled_models.push_back(
-                    std::make_shared<CompiledModel>(ib,
+                    std::make_shared<CompiledModel>(sub_ib,
                                                     plugin,
                                                     m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>(),
-                                                    //m_context,
                                                     configs_for_tp[i],
                                                     loaded_from_cache,
                                                     m_sub_memory_manager));
                 GPU_DEBUG_TRACE_DETAIL << "sub models for TP created, rank " << configs_for_tp[i].streamsRankTable[i][0]
                                        << std::endl;
-                std::cout << "[" << __FILE__ << ":" << __LINE__ << "] [WY-DEBUG]: compiled sub models from cache: " << i
-                          << std::endl;
+                std::cout << "[import] sub compiled model for TP has been created on rank "
+                          << configs_for_tp[i].streamsRankTable[i][0] << std::endl;
+                std::cout << "===========================\n";
             };
             sub_tasks.push_back(std::bind(compile_tp_model, i));
         }

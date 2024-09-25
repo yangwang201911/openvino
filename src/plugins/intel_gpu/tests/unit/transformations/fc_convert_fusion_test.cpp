@@ -126,7 +126,7 @@ TEST(TransformationTestsF1, FullyConnectedSplitInput16) {
 
         // -------- Loading a model to the device --------
         ov::Core core;
-        ov::CompiledModel compiled_model = core.compile_model(model, "GPU", {ov::device::priorities("GPU.0,GPU.1"), ov::cache_dir("/home/openvino-ci-96/bell/tp_cache_dir")});
+        ov::CompiledModel compiled_model = core.compile_model(model, "GPU.0", {ov::device::priorities("GPU.0,GPU.1"), ov::cache_dir("/mnt/users/ywang2_95/tp_cache_dir")});
 
         // -------- Create an infer request --------
         ov::InferRequest infer_request = compiled_model.create_infer_request();
