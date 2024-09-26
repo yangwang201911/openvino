@@ -275,8 +275,6 @@ std::shared_ptr<ov::ICompiledModel> Plugin::compile_model(const std::shared_ptr<
             }
             if (ret.size() > 2) {
                 GPU_DEBUG_LOG << "Will only select 2 devices for TP." << std::endl;
-                std::cout << "[WY-DEBUG][" << __FILE__ << ":" << __LINE__
-                          << "] will keep the first 2 device from list.";
                 ret = std::vector<std::string>(ret.begin(), ret.begin() + 2);
             }
         }
@@ -288,8 +286,6 @@ std::shared_ptr<ov::ICompiledModel> Plugin::compile_model(const std::shared_ptr<
         devices_for_tp += "GPU." + device_id + ",";
     }
     devices_for_tp.pop_back();
-    std::cout << "[WY-DEBUG][" << __FILE__ << ":" << __LINE__
-              << "] device priorities after filtered: " << devices_for_tp << std::endl;
     if (1) {
         auto get_rank_table = [&]() {
             std::vector<std::vector<int>> rank_table = {};
@@ -303,10 +299,10 @@ std::shared_ptr<ov::ICompiledModel> Plugin::compile_model(const std::shared_ptr<
         for (auto& device_id : devices_id_for_tp) {
             config.register_device_context_for_tp(get_default_context(device_id));
             contexts_for_tp.insert({device_id, get_default_context(device_id)});
-            std::cout << "Registered device with id GPU." << device_id << " for TP." << std::endl;
+            GPU_DEBUG_LOG << "Registered device with id GPU." << device_id << " for TP." << std::endl;
         }
         if (config.get_context_for_tp().size() > 1) {
-            std::cout << "***************************** enable tp *****************************\n";
+            GPU_DEBUG_LOG << "Enable TP" << std::endl;
             config.enableSubStreams = true;
             config.streamsRankTable = get_rank_table();
         }
@@ -456,10 +452,9 @@ std::shared_ptr<ov::ICompiledModel> Plugin::import_model(std::istream& model,
     cldnn::BinaryInputBuffer ib(model, context_impl->get_engine());
     std::size_t num_sub_compiled_models = 0;
     ib >> num_sub_compiled_models;
-    
+
     if (num_sub_compiled_models > 0) {
-        std::cout << "[" << __FILE__ << ":" << __LINE__
-                  << "] [WY-DEBUG]: Number of cached sub-compiled models: " << num_sub_compiled_models << std::endl;
+        GPU_DEBUG_LOG << "Number of cached sub-compiled models for TP: " << num_sub_compiled_models << std::endl;
         auto get_rank_table = [&]() {
             std::vector<std::vector<int>> rank_table = {};
             for (size_t i = 0; i < num_sub_compiled_models; i++) {
@@ -472,7 +467,7 @@ std::shared_ptr<ov::ICompiledModel> Plugin::import_model(std::istream& model,
         for (std::size_t id = 0; id < num_sub_compiled_models; id++) {
             std::string device_id;
             ib >> device_id;
-            std::cout << "Registered cached device with id: GPU." << device_id << std::endl;
+            GPU_DEBUG_LOG << "Registered cached device with id: GPU." << device_id << std::endl;
             config.register_device_context_for_tp(get_default_context(device_id));
             contexts_for_tp.insert({device_id, get_default_context(device_id)});
         }
