@@ -106,11 +106,7 @@ FullyConnectedHorizontalFusion::FullyConnectedHorizontalFusion() {
                 return false;
             if (weight_dtype != fc->get_input_element_type(1))
                 return false;
-            // if (m_fc->get_friendly_name() == "__module.model.layers.2.self_attn.q_proj/aten::linear/MatMul") {
-            //     orig_n_sizes.push_back(fc->get_input_shape(1)[fc->get_input_shape(1).size() - 2]/2);
-            // } else {
             orig_n_sizes.push_back(fc->get_input_shape(1)[fc->get_input_shape(1).size() - 2]);
-            // }
         }
         auto weight_nodes_as_output_vector = ov::OutputVector{weight_nodes[0], weight_nodes[1], weight_nodes[2]};
         auto fused_weight = std::make_shared<ov::op::v0::Concat>(weight_nodes_as_output_vector, 0);
