@@ -31,7 +31,8 @@ size_t subgroup_size(gpu_arch arch) {
         case gpu_arch::xe_hpg: return 8;
         case gpu_arch::xe_hpc:
         case gpu_arch::xe2:
-        case gpu_arch::xe3: return 16;
+        case gpu_arch::xe3:
+        case gpu_arch::xe3p: return 16;
         default: return 0;
     }
 }
@@ -207,7 +208,8 @@ void SDPAKernelMicro::init_microkernels(const sdpa_params& params, micro::Packag
         }
         case gpu_arch::xe_hpc:
         case gpu_arch::xe2:
-        case gpu_arch::xe3: {
+        case gpu_arch::xe3:
+        case gpu_arch::xe3p: {
             config = choose_config_xehpc(static_cast<int32_t>(head_size), static_cast<int32_t>(n_keys.v), thin_q);
             break;
         }
