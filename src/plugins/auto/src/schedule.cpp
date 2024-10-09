@@ -276,7 +276,8 @@ Schedule::~Schedule() {
             size_t count = req_all_start_times.size();
             OPENVINO_ASSERT(count == req_all_end_times.size());
             std::chrono::duration<double, std::milli> first_infer_durtation =
-                req_all_end_times.front() - req_all_start_times.front();
+                count > 0 ? req_all_end_times.front() - req_all_start_times.front()
+                          : std::chrono::duration<double, std::milli>::zero();
             req_all_start_times.sort(std::less<Time>());
             req_all_end_times.sort(std::less<Time>());
             {

@@ -53,7 +53,7 @@ public:
 
         auto K_splits = 2;
         // split task on more cores is better on TBB
-        auto valid_nthr = nthr / 2;
+        auto valid_nthr = nthr / 2 == 0 ? 1 : nthr / 2;
         auto blkN_per_thread = (num_blk_N) / valid_nthr;
         auto blkN_leftover = num_blk_N - (blkN_per_thread * valid_nthr);
         auto start_blkN = 0;
