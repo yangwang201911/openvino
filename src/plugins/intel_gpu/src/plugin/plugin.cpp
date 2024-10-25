@@ -437,10 +437,9 @@ std::shared_ptr<ov::ICompiledModel> Plugin::import_model(std::istream& model,
     cldnn::BinaryInputBuffer ib(model, context_impl->get_engine());
     std::size_t num_sub_compiled_models = 0;
     ib >> num_sub_compiled_models;
-    
+
     if (num_sub_compiled_models > 0) {
-        std::cout << "[" << __FILE__ << ":" << __LINE__
-                  << "] [WY-DEBUG]: Number of cached sub-compiled models: " << num_sub_compiled_models << std::endl;
+        GPU_DEBUG_LOG << "Number of cached sub-compiled models for TP: " << num_sub_compiled_models << std::endl;
         auto get_rank_table = [&]() {
             std::vector<std::vector<int>> rank_table = {};
             for (size_t i = 0; i < num_sub_compiled_models; i++) {
@@ -453,7 +452,7 @@ std::shared_ptr<ov::ICompiledModel> Plugin::import_model(std::istream& model,
         for (std::size_t id = 0; id < num_sub_compiled_models; id++) {
             std::string device_id;
             ib >> device_id;
-            std::cout << "Registered cached device with id: GPU." << device_id << std::endl;
+            GPU_DEBUG_LOG << "Registered cached device with id: GPU." << device_id << std::endl;
             config.register_device_context_for_tp(get_default_context(device_id));
             contexts_for_tp.insert({device_id, get_default_context(device_id)});
         }

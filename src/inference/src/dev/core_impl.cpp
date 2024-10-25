@@ -1443,14 +1443,13 @@ ov::SoPtr<ov::ICompiledModel> ov::CoreImpl::load_model_from_cache(
             compiled_model = context ? plugin.import_model(networkStream, context, update_config)
                                      : plugin.import_model(networkStream, update_config);
         });
-    } catch (const HeaderException& e) {
+    } catch (const HeaderException&) {
         // For these exceptions just remove old cache and set that import didn't work
         cacheContent.cacheManager->remove_cache_entry(cacheContent.blobId);
-        std::cout << "***************\n\t\tFailed to load cache: " << cacheContent.blobId << std::endl;
     } catch (...) {
         cacheContent.cacheManager->remove_cache_entry(cacheContent.blobId);
-        std::cout << "***************\n\t\tFailed to load cache: " << cacheContent.blobId << "\n********************\n";
         // TODO: temporary disabled by #54335. In future don't throw only for new 'blob_outdated' exception
+        // throw;
     }
 
     // fallback scenario

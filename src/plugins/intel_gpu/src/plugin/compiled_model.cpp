@@ -282,34 +282,16 @@ CompiledModel::CompiledModel(cldnn::BinaryInputBuffer& ib,
                                                             {},
                                                             configs_for_tp[i].streamsRankTable[i]};
                 configs_for_tp[i].subStreamExecConfig = std::move(streamExecutorConfig);
-                cldnn::BinaryInputBuffer sub_ib(
-                    ib.get_stream(),
-                    m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>()->get_engine());
-                std::cout << "===========================\n";
-                std::cout << "[import] context name: "
-                          << m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>()->get_device_name()
-                          << std::endl;
-                std::cout << "[import] context engine uuid: "
-                          << m_config.get_context_for_tp()[i]
-                                 .as<RemoteContextImpl::Ptr>()
-                                 ->get_engine()
-                                 .get_device_info()
-                                 .uuid
-                          << std::endl;
-                std::cout << "[import] sub blob stream engine uuid: " << sub_ib.get_engine().get_device_info().uuid
-                          << std::endl;
-                m_sub_compiled_models.push_back(
-                    std::make_shared<CompiledModel>(sub_ib,
-                                                    plugin,
-                                                    m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>(),
-                                                    configs_for_tp[i],
-                                                    loaded_from_cache,
-                                                    m_sub_memory_manager));
-                GPU_DEBUG_TRACE_DETAIL << "sub models for TP created, rank " << configs_for_tp[i].streamsRankTable[i][0]
-                                       << std::endl;
-                std::cout << "[import] sub compiled model for TP has been created on rank "
-                          << configs_for_tp[i].streamsRankTable[i][0] << std::endl;
-                std::cout << "===========================\n";
+                auto sub_context = m_config.get_context_for_tp()[i].as<RemoteContextImpl::Ptr>();
+                cldnn::BinaryInputBuffer sub_ib(ib.get_stream(), sub_context->get_engine());
+                m_sub_compiled_models.push_back(std::make_shared<CompiledModel>(sub_ib,
+                                                                                plugin,
+                                                                                sub_context,
+                                                                                configs_for_tp[i],
+                                                                                loaded_from_cache,
+                                                                                m_sub_memory_manager));
+                GPU_DEBUG_LOG << "sub models on device " << sub_context->get_device_name() << " for TP created, rank "
+                              << configs_for_tp[i].streamsRankTable[i][0] << std::endl;
             };
             sub_tasks.push_back(std::bind(compile_tp_model, i));
         }
@@ -332,10 +314,6 @@ std::shared_ptr<ov::IAsyncInferRequest> CompiledModel::create_infer_request() co
         std::vector<std::shared_ptr<IAsyncInferRequest>> requests;
         for (auto model : m_sub_compiled_models) {
             requests.push_back(model->create_infer_request());
-            std::cout << "\n*[WY-DEBUG]: create sub infer request: " << requests.back().get()
-                      << "\t on engine info: " << &(model->get_context_impl()->get_engine().get_device_info())
-                      << " from device: " << model->get_context_impl()->get_device_name() << std::endl;
-            std::cout << "\n";
         }
         async_infer_request->setSubInferRequest(requests);
         async_infer_request->setSubInfer(true);
@@ -362,7 +340,7 @@ void CompiledModel::export_model(std::ostream& model) const {
         if (dotPos != std::string::npos) {
             auto device_id = device_name.substr(dotPos + 1);
             ob << device_id;
-            std::cout << "*[WY-DEBUG]: will cache device: " << device_name << "\t with id: " << device_id << std::endl;
+            GPU_DEBUG_LOG << "will cache for device " << device_name << std::endl;
         }
     }
 
@@ -406,16 +384,15 @@ void CompiledModel::export_model(std::ostream& model) const {
             }
         }
     };
-    std::cout << "[" << __FILE__ << ":" << __LINE__ << "] [WY-DEBUG]: caching warp model...\n";
     export_inputs_outputs();
     if (!m_has_sub_compiled_models)
         m_graphs[0]->export_model(ob);
 
     for (std::size_t index = 0; index < m_sub_compiled_models.size(); index++) {
-        std::cout << "[" << __FILE__ << ":" << __LINE__ << "] [WY-DEBUG]: caching sub model for: "
-                  << m_sub_compiled_models.at(index)->get_context()->get_device_name() << std::endl;
         export_inputs_outputs();
         m_sub_compiled_models.at(index)->get_graph(0)->export_model(ob);
+        GPU_DEBUG_LOG << "cached the sub compiled model for device "
+                      << m_sub_compiled_models.at(index)->get_context()->get_device_name() << std::endl;
     }
 }
 
