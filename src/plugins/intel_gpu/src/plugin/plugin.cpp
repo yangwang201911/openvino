@@ -194,17 +194,9 @@ std::shared_ptr<ov::ICompiledModel> Plugin::compile_model(const std::shared_ptr<
     auto iter_devices_for_tp = orig_config.find(ov::device::priorities.name()) == orig_config.end();
     std::string devices_for_tp =
         iter_devices_for_tp ? "" : config.get_property(ov::device::priorities.name()).as<std::string>();
-    if (devices_for_tp.empty()) {
-        GPU_DEBUG_LOG
-            << "No available device specified for TP. will initialize device list for TP with all available device."
-            << std::endl;
-        for (const auto& item : m_configs_map) {
-            devices_for_tp += "GPU." + item.first + ",";
-        }
-        devices_for_tp.pop_back();
-    }
     auto parse_devices_id = [&](const std::string devices_for_tp,
                                 const std::string delimiter = ",") -> std::vector<std::string> {
+        std::cout << "devices_for_tp: " << devices_for_tp << std::endl;
         bool is_set_device_id = orig_config.find(ov::device::id.name()) != orig_config.end();
         std::vector<std::string> ret;
         if (is_set_device_id)
@@ -248,7 +240,7 @@ std::shared_ptr<ov::ICompiledModel> Plugin::compile_model(const std::shared_ptr<
         }
         std::string target_device = is_set_device_id ? std::string("GPU.") + device_id : "GPU";
         if (is_set_device_id) {
-            if (ret.size() < 2) {
+            if (ret.size() < 4) {
                 OPENVINO_THROW("Invalid number of parsed device found for TP from specified device candidate list: ",
                                devices_for_tp,
                                " when compiling model to target device: ",
@@ -273,20 +265,11 @@ std::shared_ptr<ov::ICompiledModel> Plugin::compile_model(const std::shared_ptr<
                     }
                 }
             }
-            if (ret.size() > 2) {
-                GPU_DEBUG_LOG << "Will only select 2 devices for TP." << std::endl;
-                ret = std::vector<std::string>(ret.begin(), ret.begin() + 2);
-            }
         }
         return ret;
     };
-    auto devices_id_for_tp = parse_devices_id(devices_for_tp);
-    devices_for_tp.clear();
-    for (const auto& device_id : devices_id_for_tp) {
-        devices_for_tp += "GPU." + device_id + ",";
-    }
-    devices_for_tp.pop_back();
-    if (1) {
+    if (!devices_for_tp.empty()) {
+        auto devices_id_for_tp = parse_devices_id(devices_for_tp);
         auto get_rank_table = [&]() {
             std::vector<std::vector<int>> rank_table = {};
             for (size_t i = 0; i < config.get_context_for_tp().size(); i++) {
@@ -296,15 +279,17 @@ std::shared_ptr<ov::ICompiledModel> Plugin::compile_model(const std::shared_ptr<
             }
             return rank_table;
         };
-        for (auto& device_id : devices_id_for_tp) {
-            config.register_device_context_for_tp(get_default_context(device_id));
-            contexts_for_tp.insert({device_id, get_default_context(device_id)});
-            GPU_DEBUG_LOG << "Registered device with id GPU." << device_id << " for TP." << std::endl;
-        }
-        if (config.get_context_for_tp().size() > 1) {
-            GPU_DEBUG_LOG << "Enable TP" << std::endl;
-            config.enableSubStreams = true;
-            config.streamsRankTable = get_rank_table();
+        if (devices_id_for_tp.size() > 1) {
+            for (auto& device_id : devices_id_for_tp) {
+                config.register_device_context_for_tp(get_default_context(device_id));
+                contexts_for_tp.insert({device_id, get_default_context(device_id)});
+                std::cout << "Registered device with id GPU." << device_id << " for TP." << std::endl;
+            }
+            if (config.get_context_for_tp().size() > 1) {
+                std::cout << "***************************** enable tp *****************************\n";
+                config.enableSubStreams = true;
+                config.streamsRankTable = get_rank_table();
+            }
         }
     }
 
