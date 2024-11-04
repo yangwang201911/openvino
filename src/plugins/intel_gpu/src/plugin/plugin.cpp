@@ -436,7 +436,7 @@ std::shared_ptr<ov::ICompiledModel> Plugin::import_model(std::istream& model,
         return nullptr;
     cldnn::BinaryInputBuffer ib(model, context_impl->get_engine());
     std::size_t num_sub_compiled_models = 0;
-    ib >> num_sub_compiled_models;
+    //ib >> num_sub_compiled_models;
 
     if (num_sub_compiled_models > 0) {
         GPU_DEBUG_LOG << "Number of cached sub-compiled models for TP: " << num_sub_compiled_models << std::endl;

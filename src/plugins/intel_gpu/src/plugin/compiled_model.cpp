@@ -333,13 +333,13 @@ void CompiledModel::export_model(std::ostream& model) const {
     OPENVINO_ASSERT(!m_graphs.empty(), "[GPU] Model not loaded");
 
     cldnn::BinaryOutputBuffer ob(model);
-    ob << m_sub_compiled_models.size();
+    //ob << m_sub_compiled_models.size();
     for (const auto& sub_compiled_model : m_sub_compiled_models) {
         auto device_name = sub_compiled_model->get_context()->get_device_name();
         auto dotPos = device_name.find(".");
         if (dotPos != std::string::npos) {
             auto device_id = device_name.substr(dotPos + 1);
-            ob << device_id;
+            //ob << device_id;
             GPU_DEBUG_LOG << "will cache for device " << device_name << std::endl;
         }
     }
@@ -393,6 +393,8 @@ void CompiledModel::export_model(std::ostream& model) const {
         m_sub_compiled_models.at(index)->get_graph(0)->export_model(ob);
         GPU_DEBUG_LOG << "cached the sub compiled model for device "
                       << m_sub_compiled_models.at(index)->get_context()->get_device_name() << std::endl;
+        std::cout << "==== Export single sub compiled model ====\n";
+        break;
     }
 }
 
