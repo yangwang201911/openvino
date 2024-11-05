@@ -105,7 +105,6 @@ class FileStorageCacheManager final : public ICacheManager {
 #else
     std::string getBlobFile(const std::string& blobHash) const {
         if (ov::util::get_file_ext(m_cachePath) == ".blob") {
-            std::cout << "----- WILL load cache from blob file: " << m_cachePath << std::endl;
             return m_cachePath;
         }
         return ov::util::make_path(m_cachePath, blobHash + ".blob");
@@ -139,6 +138,7 @@ private:
         auto blobFileName = getBlobFile(id);
         if (ov::util::file_exists(blobFileName)) {
             std::ifstream stream(blobFileName, std::ios_base::binary);
+            std::cout << "----- WILL load cache directly from blob file: " << blobFileName << std::endl;
             reader(stream);
         }
     }

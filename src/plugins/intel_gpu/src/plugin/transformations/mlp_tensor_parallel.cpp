@@ -144,7 +144,9 @@ MLPTensorParallelFusion::MLPTensorParallelFusion(size_t world_size, size_t world
                         }
                     }
                 }
-                auto output_type = m_fc->get_output_element_type(0);
+                auto output_type = org_fc->get_output_element_type(0);
+                if (org_fc->get_friendly_name().find("down_proj") != std::string::npos)
+                    output_type = ov::element::Type(ov::element::Type_t::f32);
                 if (compressed_fc) {
                     if (compressed_fc->inputs().size() > 4)
                         splitted_fc = std::make_shared<op::FullyConnectedCompressed>(
@@ -191,7 +193,7 @@ MLPTensorParallelFusion::MLPTensorParallelFusion(size_t world_size, size_t world
                 }
                 auto new_fc = split_fc(fc_node, op::TP_MODE::ALL_REDUCE).first;
                 new_fc->get_rt_info().insert({"splitted", true});
-                std::shared_ptr<ov::intel_gpu::op::SyncTensor> sync_node;
+                /*std::shared_ptr<ov::intel_gpu::op::SyncTensor> sync_node;
                 sync_node =
                     std::make_shared<ov::intel_gpu::op::SyncTensor>(new_fc,
                                                                     world_size,
@@ -199,10 +201,10 @@ MLPTensorParallelFusion::MLPTensorParallelFusion(size_t world_size, size_t world
                                                                     fc_node->get_input_node_shared_ptr(1)->get_shape()[-1],
                                                                     fc_node->get_element_type(),
                                                                     ov::intel_gpu::op::TP_MODE::ALL_REDUCE);
-                sync_node->set_friendly_name(fc_node->get_friendly_name() + "_TP");
+                sync_node->set_friendly_name(fc_node->get_friendly_name() + "_TP");*/
                 copy_runtime_info(fc_node, new_fc);
                 for (auto& iter : org_users) {
-                    iter.second->input(iter.first).replace_source_output(sync_node->output(0));
+                    iter.second->input(iter.first).replace_source_output(new_fc->output(0));
                 }
                 fc_node->clear_control_dependencies();
             };

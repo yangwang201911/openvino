@@ -384,15 +384,18 @@ void CompiledModel::export_model(std::ostream& model) const {
             }
         }
     };
-    export_inputs_outputs();
-    if (!m_has_sub_compiled_models)
+
+    if (!m_has_sub_compiled_models) {
+        export_inputs_outputs();
         m_graphs[0]->export_model(ob);
+    }
 
     for (std::size_t index = 0; index < m_sub_compiled_models.size(); index++) {
-        export_inputs_outputs();
-        m_sub_compiled_models.at(index)->get_graph(0)->export_model(ob);
-        GPU_DEBUG_LOG << "cached the sub compiled model for device "
-                      << m_sub_compiled_models.at(index)->get_context()->get_device_name() << std::endl;
+        // export_inputs_outputs();
+        // m_sub_compiled_models.at(index)->get_graph(0)->export_model(ob);
+        m_sub_compiled_models.at(index)->export_model(model);
+        std::cout << "cached the sub compiled model for device "
+                  << m_sub_compiled_models.at(index)->get_context()->get_device_name() << std::endl;
         std::cout << "==== Export single sub compiled model ====\n";
         break;
     }
