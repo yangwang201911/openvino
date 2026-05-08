@@ -59,16 +59,17 @@ public:
         add_stage(pa_single_token_finalization, params);
         add_stage(pa_multi_token_1, params);
         if (desc->has_xattention) {
-            add_stage(pa_multi_token_128, params);
-            if (params.get_device_info().arch >= gpu_arch::xe2) {
+            // On Xe2+, CMPA_WG_SEQ_LEN=256, so block_size=128 kernels take the non-optimized
+            // IGC path causing extremely long compile times or IGC crashes (longjmp errors).
+            // Only compile block_size=128 stages for pre-Xe2 devices,
+            // and block_size=256 stages for Xe2+ devices.
+            if (params.get_device_info().arch < gpu_arch::xe2) {
+                add_stage(pa_multi_token_128, params);
+                add_stage(xattn_estimate_gemmqk, params);
+                add_stage(xattn_estimate_find_block, params);
+                add_stage(xattn_estimate_post_proc, params);
+            } else {
                 add_stage(pa_multi_token_256, params);
-            }
-
-            add_stage(xattn_estimate_gemmqk, params);
-            add_stage(xattn_estimate_find_block, params);
-            add_stage(xattn_estimate_post_proc, params);
-
-            if (params.get_device_info().arch >= gpu_arch::xe2) {
                 add_stage(xattn_estimate_gemmqk_256, params);
                 add_stage(xattn_estimate_find_block_256, params);
                 add_stage(xattn_estimate_post_proc_256, params);
@@ -300,8 +301,10 @@ private:
             return block_size_128;
         }
 
-        xattn_block_size = (xattn_block_size == block_size_128 || xattn_block_size == block_size_256) ? xattn_block_size : block_size_256;
-        return xattn_block_size;
+        // On Xe2+, CMPA_WG_SEQ_LEN=256, so only block_size_256 uses the optimized pipeline.
+        // block_size_128 would use the non-optimized path with extremely long IGC compile time.
+        // Force block_size_256 for all Xe2+ devices.
+        return block_size_256;
     }
 
 #if DUMP_XATTN_INTERNALS
