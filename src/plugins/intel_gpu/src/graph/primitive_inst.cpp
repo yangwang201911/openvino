@@ -1916,14 +1916,9 @@ void primitive_inst::do_runtime_in_place_crop() {
                 GPU_DEBUG_TRACE_DETAIL << "[In place crop] update shape for " << u->id() << std::endl;
                 u->update_shape();
                 u->_update_shape_done_by_other = true;
-                std::cout << "[DBG-CROP] crop=" << u->id() << " crop_out_after_update=" << u->_impl_params->get_output_layout().to_short_string()
-                          << " this(pred)=" << id() << " pred_out=" << _impl_params->get_output_layout().to_short_string() << std::endl;
 
                 const auto& crop_users = u->get_user_insts();
                 std::pair<const program_node*, layout> user_info;
-                std::cout << "[DBG-CROP] crop=" << u->id() << " n_users=" << crop_users.size()
-                          << " front_user=" << (crop_users.empty() ? std::string("<none>") : crop_users.front()->id())
-                          << " front_type=" << (crop_users.empty() ? std::string("<none>") : std::string(crop_users.front()->get_node().get_primitive()->type_string())) << std::endl;
                 if (!crop_users.empty() && crop_users.front()->get_node().is_type<reshape>()) {
                     OPENVINO_ASSERT(crop_users.size() == 1, "[GPU] Expected number of reshape users is 1, but it is ", crop_users.size());
                     auto reshape_inst = crop_users.front();
@@ -1941,9 +1936,6 @@ void primitive_inst::do_runtime_in_place_crop() {
                     reshape_inst->_update_shape_done_by_other = true;
                     user_info.first = &reshape_inst->get_node();
                     user_info.second = reshape_inst->_impl_params->get_output_layout();
-                    std::cout << "[DBG-CROP] crop=" << u->id()
-                              << " reshape=" << reshape_inst->id()
-                              << " reshape_out=" << user_info.second.to_short_string() << std::endl;
                 }
 
                 layout crop_layout = u->_impl_params->get_output_layout();
@@ -1956,10 +1948,6 @@ void primitive_inst::do_runtime_in_place_crop() {
 
                 auto crop_axis = u->_impl_params->typed_desc<crop>()->axis;
                 auto offsets = u->_impl_params->input_offsets[0];
-                std::cout << "[DBG-CROP] crop=" << u->id()
-                          << " along_feature=" << crop_in_place_optimization::can_crop_be_optimized_along_feature(crop_layout, pred_layout)
-                          << " simple_df=" << crop_in_place_optimization::can_crop_be_optimized_simple_data_format(crop_layout, pred_layout)
-                          << " user_info.first=" << (user_info.first ? "SET" : "NULL") << std::endl;
                 // A crop feeding a reshape is routed to the simple_data_format path below: that path
                 // correctly propagates the in-place padding into the reshape output layout (and rejects
                 // the optimization when the offset cannot be expressed in the reshaped space). The
@@ -1969,14 +1957,12 @@ void primitive_inst::do_runtime_in_place_crop() {
                     crop_in_place_optimization::update_in_place_crop_padding_along_feature(u->get_node(), crop_layout, pred_layout, offsets, crop_axis, true);
                 } else if (crop_in_place_optimization::can_crop_be_optimized_simple_data_format(crop_layout, pred_layout)) {
                     if (!crop_in_place_optimization::update_in_place_crop_padding_simple_data_format(crop_layout, pred_layout, user_info, offsets, crop_axis, true)) {
-                        std::cout << "[DBG-CROP] crop=" << u->id() << " SIMPLE_DF -> COPY FALLBACK (indivisible)" << std::endl;
                         u->set_can_be_optimized(false);
                         GPU_DEBUG_TRACE_DETAIL << "[In place crop] " << u->id() << " cannot be optimized due to padding indivisibility" << std::endl;
                         continue;
                     }
                     if (user_info.first) {
                         auto reshape_inst = crop_users.front();
-                        std::cout << "[DBG-CROP] crop=" << u->id() << " SIMPLE_DF in-place, set reshape_out=" << user_info.second.to_short_string() << std::endl;
                         reshape_inst->_impl_params->output_layouts[0] = user_info.second;
                         reshape_inst->set_flag(ExecutionFlags::SHAPE_CHANGED);
                     }

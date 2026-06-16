@@ -2438,27 +2438,37 @@ TEST(prepare_buffer_fusing, in_place_crop_split_axis1_three_crops_vlsdpa_consume
 }
 
 // =============================================================================
-// STEP 1 (reproduction): Cecilia's own rank-3 form WITH execute + data check.
+// TransposeSplitMatcher: Split(axis=1) with 3 crops -> Reshape -> eltwise,
+// executed end-to-end with a per-element data check.
 //
-// Byte-for-byte the same blueprint as
-//   in_place_crop_split_axis1_three_crops_eltwise_consumer
-//   Input[-1,3,H,S] -> crop(axis=1, slice=k) -> base reshape -> [-1,H,S]
-// (dynamic topo, marker reorders, build_program no_optimizations=true,
-//  is_runtime_propagatable_padding asserted true, can_be_optimized asserted true)
-// but this test ADDITIONALLY executes the network and compares every output
-// element against the expected crop slice. Her original test stops at the
-// can_be_optimized flag and never executes, so it cannot detect a wrong runtime
-// offset produced by the along_feature in-place crop path.
+// Topology (dynamic batch):
+//   Input[-1,3,H,S]
+//     crop(axis=1, slice=k) -> reshape[-1,H,S] -> eltwise(*1.0) -> reorder("outk")
+//   for k = 0,1,2 (variadic_split {1,1,1}).
 //
-// Expected: out_k[l,h,s] == in[l, k, h, s]
+// The crop->reshape in-place optimization must propagate the feature-axis crop
+// offset all the way into the reshaped [L,H,S] output so that, after execution,
+// each output slice equals the corresponding slice of the packed input:
+//
+//   out_k[l,h,s] == in[l, k, h, s]
+//
+// Unlike the flag-only tests (which stop at can_be_optimized() and never call
+// net.execute()), this test runs the network and verifies every element. It
+// therefore catches a wrong runtime offset that the flag check alone cannot:
+// the squeeze [L,1,H,S]->[L,H,S] needs a per-batch stride of 3*H*S, so an
+// in-place path that only encodes the feature-axis padding produces correct
+// data for batch 0 but corrupts batch >= 1.
 // =============================================================================
 TEST(prepare_buffer_fusing, in_place_crop_split_axis1_rank3_datacheck) {
     auto& engine = get_test_engine();
     tests::random_generator rg(GET_SUITE_NAME);
 
+    // L is the batch (sequence length); the packed feature dim is 3 (Q/K/V).
     const int64_t H = 4, S = 8;
     const int64_t L = 16;
 
+    // Static layout for buffer allocation; dynamic layout to exercise the
+    // runtime in-place crop path with an unresolved batch dimension.
     auto in_layout      = layout{{L, 3, H, S}, data_types::f16, format::bfyx};
     auto in_layout_dyn  = layout{ov::PartialShape{-1, 3, H, S}, data_types::f16, format::bfyx};
     auto input_mem      = engine.allocate_memory(in_layout);
@@ -2477,9 +2487,13 @@ TEST(prepare_buffer_fusing, in_place_crop_split_axis1_rank3_datacheck) {
     auto rs_shape_dyn = ov::PartialShape{-1, H, S};
 
     // Consumer mirrors the real RoPE proxy: reshape -> eltwise(*1.0) -> reorder.
-    // eltwise(*1.0) keeps data identical so the element-wise check still holds,
-    // while matching the eltwise consumer used by the vlsdpa test (so no extra
-    // reorder is inserted between crop and reshape).
+    // - eltwise(*1.0) keeps the data identical so the per-element check still holds,
+    //   while matching the eltwise consumer of the vlsdpa test (an eltwise user
+    //   keeps the crop->reshape edge direct, with no auto-inserted reorder).
+    // - The reshape is given a real pattern {-1, H, S} (not an empty pattern) so
+    //   that at runtime it resolves the batch from the now-static crop output
+    //   instead of staying dynamic; otherwise the reshape output would remain
+    //   [?,H,S] and a downstream count() would throw on a dynamic shape.
     topology topo_dyn(
         input_layout("input", in_layout_dyn),
         data("axis",       axis_mem),
@@ -2505,6 +2519,8 @@ TEST(prepare_buffer_fusing, in_place_crop_split_axis1_rank3_datacheck) {
     config_dyn.set_property(ov::intel_gpu::allow_new_shape_infer(true));
     config_dyn.set_property(ov::intel_gpu::optimize_data(true));
 
+    // Build-time decision: every reshape must be marked runtime-propagatable so
+    // the crop->reshape in-place optimization is allowed to fire.
     auto prog = program::build_program(engine, topo_dyn, config_dyn, false, true);
     ASSERT_NE(prog, nullptr);
     ASSERT_TRUE(prog->get_node("reshape0").as<reshape>().is_runtime_propagatable_padding());
@@ -2514,11 +2530,13 @@ TEST(prepare_buffer_fusing, in_place_crop_split_axis1_rank3_datacheck) {
     network net(engine, topo_dyn, config_dyn);
     net.set_input_data("input", input_mem);
 
+    // All three crops are expected to keep can_be_optimized() == true (the
+    // in-place crop optimization stays enabled for this pattern).
     ASSERT_TRUE(net.get_primitive("crop0")->can_be_optimized());
     ASSERT_TRUE(net.get_primitive("crop1")->can_be_optimized());
     ASSERT_TRUE(net.get_primitive("crop2")->can_be_optimized());
 
-    // --- New: actually run and verify the data ---
+    // Execute and verify the data: out_k[l,h,s] must equal in[l,k,h,s].
     std::map<cldnn::primitive_id, cldnn::network_output> outputs;
     OV_ASSERT_NO_THROW(outputs = net.execute());
 
@@ -2527,20 +2545,11 @@ TEST(prepare_buffer_fusing, in_place_crop_split_axis1_rank3_datacheck) {
         auto out_mem = outputs.at("out" + std::to_string(k)).get_memory();
         ASSERT_NE(out_mem, nullptr);
         cldnn::mem_lock<ov::float16> out_ptr(out_mem, get_test_stream());
-        int64_t total_mismatch = 0;
-        int64_t first_bad_l = -1;
-        for (int64_t l = 0; l < L; l++) {
-            int64_t row_mismatch = 0;
+        for (int64_t l = 0; l < L; l++)
             for (int64_t h = 0; h < H; h++)
                 for (int64_t s = 0; s < S; s++)
-                    if (out_ptr[(l * H + h) * S + s] != in_ptr[((l * 3 + k) * H + h) * S + s])
-                        row_mismatch++;
-            if (row_mismatch > 0 && first_bad_l < 0)
-                first_bad_l = l;
-            total_mismatch += row_mismatch;
-            std::cout << "[DBG-DATA] k=" << k << " l=" << l << " mismatch=" << row_mismatch << "/" << (H * S) << std::endl;
-        }
-        std::cout << "[DBG-DATA] k=" << k << " TOTAL mismatch=" << total_mismatch << "/" << (L * H * S)
-                  << " first_bad_l=" << first_bad_l << std::endl;
+                    ASSERT_EQ(out_ptr[(l * H + h) * S + s],
+                              in_ptr[((l * 3 + k) * H + h) * S + s])
+                        << "k=" << k << " l=" << l << " h=" << h << " s=" << s;
     }
 }
