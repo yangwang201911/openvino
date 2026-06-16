@@ -1,3 +1,4 @@
+#include <execinfo.h>
 // Copyright (C) 2018-2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -254,8 +255,13 @@ std::string layout::to_short_string() const {
 }
 
 size_t layout::count() const {
-    if (is_dynamic())
+    if (is_dynamic()) {
+        std::cerr << "[DBG-COUNT] count() on dynamic layout: " << to_short_string() << std::endl;
+        void* bt[64];
+        int n = backtrace(bt, 64);
+        backtrace_symbols_fd(bt, n, 2);
         throw std::runtime_error("[GPU] Count is called for dynamic shape");
+    }
 
     return ov::shape_size(size.to_shape());
 }
