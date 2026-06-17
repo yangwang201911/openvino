@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <iostream>
 
 #include "common_utils/kernel_generator_base.hpp"
 #include "intel_gpu/primitives/vl_sdpa.hpp"
@@ -176,22 +178,26 @@ protected:
                                       static_cast<int32_t>(query_shape[query_shape.size() - 1]);
 
             // [DBG-VLSDPA] Diagnostic for the TransposeSplitMatcher in-place crop path.
-            // Enable with OV_VERBOSE=4 (optionally OV_GPU_LOG_TO_FILE=/path). token_offset
-            // is expected to encode the QKV-slice index via lower_pad[feature]; if the crop
-            // slice offset actually lands on a different axis (e.g. axis 0 after the squeeze
-            // reshape) the feature-axis read below stays 0 and Q/K/V alias the same buffer.
-            GPU_DEBUG_TRACE_DETAIL << "[DBG-VLSDPA]"
-                << " q_shape=" << params.input_layouts[0].get_shape()
-                << " kv_shape=" << params.input_layouts[1].get_shape()
-                << " num_q_heads=" << query_shape[query_shape.size() - 3]
-                << " head_size=" << query_shape[query_shape.size() - 1]
-                << " q_lower_pad[0..3]=" << q_pad._lower_size[0] << ',' << q_pad._lower_size[1]
-                << ',' << q_pad._lower_size[2] << ',' << q_pad._lower_size[3]
-                << " kv_lower_pad[0..3]=" << kv_pad._lower_size[0] << ',' << kv_pad._lower_size[1]
-                << ',' << kv_pad._lower_size[2] << ',' << kv_pad._lower_size[3]
-                << " token_offset_q=" << token_offset_q
-                << " token_offset_kv=" << token_offset_kv
-                << std::endl;
+            // Enable by setting env DBG_VLSDPA=1; logs go to stderr so the model token stream
+            // on stdout stays clean (redirect with 2>/tmp/dbg.log). token_offset is expected to
+            // encode the QKV-slice index via lower_pad[feature]; if the crop slice offset lands
+            // on a different axis (e.g. axis 0 after the squeeze reshape) the feature-axis read
+            // below stays 0 and Q/K/V alias the same buffer.
+            static const bool dbg_vlsdpa = std::getenv("DBG_VLSDPA") != nullptr;
+            if (dbg_vlsdpa) {
+                std::cerr << "[DBG-VLSDPA]"
+                    << " q_shape=" << params.input_layouts[0].get_shape()
+                    << " kv_shape=" << params.input_layouts[1].get_shape()
+                    << " num_q_heads=" << query_shape[query_shape.size() - 3]
+                    << " head_size=" << query_shape[query_shape.size() - 1]
+                    << " q_lower_pad[0..3]=" << q_pad._lower_size[0] << ',' << q_pad._lower_size[1]
+                    << ',' << q_pad._lower_size[2] << ',' << q_pad._lower_size[3]
+                    << " kv_lower_pad[0..3]=" << kv_pad._lower_size[0] << ',' << kv_pad._lower_size[1]
+                    << ',' << kv_pad._lower_size[2] << ',' << kv_pad._lower_size[3]
+                    << " token_offset_q=" << token_offset_q
+                    << " token_offset_kv=" << token_offset_kv
+                    << std::endl;
+            }
 
             std::vector<int32_t> scalars{need_wg_mapping, token_offset_q, token_offset_kv};
             kd.params.scalars.clear();

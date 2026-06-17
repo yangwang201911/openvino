@@ -9,6 +9,8 @@
 #include "intel_gpu/runtime/stream.hpp"
 #include "program_helpers.h"
 #include "primitive_inst.h"
+#include <cstdlib>
+#include <iostream>
 #include "data_inst.h"
 #include "mutable_data_inst.h"
 #include "input_layout_inst.h"
@@ -1975,17 +1977,21 @@ void primitive_inst::do_runtime_in_place_crop() {
                 u->set_can_be_optimized(true);
                 GPU_DEBUG_TRACE_DETAIL << "[In place crop] " << u->id() << ": can_be_optimized " << std::endl;
                 // [DBG-CROP] Diagnostic for the TransposeSplitMatcher in-place crop path.
-                // Enable with OV_VERBOSE=4. crop_axis is the logical split axis; offsets shows
-                // where the slice actually starts. When the crop feeds a reshape that squeezes
-                // a leading unit dim, the slice offset axis may differ from the feature axis that
-                // vl_sdpa later reads via lower_pad[feature], so log both to compare.
-                GPU_DEBUG_TRACE_DETAIL << "[DBG-CROP] crop=" << u->id()
-                    << " crop_out=" << u->_impl_params->get_output_layout().to_short_string()
-                    << " crop_axis=" << crop_axis
-                    << " offset_batch0=" << offsets.batch[0]
-                    << " offset_feature0=" << offsets.feature[0]
-                    << " reshape_out=" << (user_info.first ? user_info.second.to_short_string() : std::string("none"))
-                    << std::endl;
+                // Enable by setting env DBG_VLSDPA=1; logs go to stderr (redirect 2>/tmp/dbg.log).
+                // crop_axis is the logical split axis; offsets shows where the slice actually
+                // starts. When the crop feeds a reshape that squeezes a leading unit dim, the
+                // slice offset axis may differ from the feature axis that vl_sdpa later reads
+                // via lower_pad[feature], so log both to compare.
+                static const bool dbg_crop = std::getenv("DBG_VLSDPA") != nullptr;
+                if (dbg_crop) {
+                    std::cerr << "[DBG-CROP] crop=" << u->id()
+                        << " crop_out=" << u->_impl_params->get_output_layout().to_short_string()
+                        << " crop_axis=" << crop_axis
+                        << " offset_batch0=" << offsets.batch[0]
+                        << " offset_feature0=" << offsets.feature[0]
+                        << " reshape_out=" << (user_info.first ? user_info.second.to_short_string() : std::string("none"))
+                        << std::endl;
+                }
             }
         }
     }
