@@ -2748,3 +2748,109 @@ TEST(prepare_buffer_fusing, in_place_crop_split_axis1_mvn_blocked_datacheck) {
         }
     }
 }
+
+// ==============================================================================
+// MULTI-ITERATION variable-batch data check (reproduces the real-model usage):
+// the SAME compiled dynamic network is executed repeatedly with a CHANGING batch
+// (sequence length), mimicking prefill (many tokens) followed by decode (1 token
+// per step). Each iteration fills a fresh input buffer with DISTINCT data and
+// verifies every output element.
+//
+// Why this matters: the in-place crop sets a dynamic padding on the crop output
+// so the reshape/eltwise consumer reads a padded view into the input buffer.
+// If that padding (which encodes the per-feature offset and the per-batch stride)
+// is not correctly recomputed when the batch changes between iterations, a later
+// iteration reads stale / mis-strided data from a previous iteration. That shows
+// up at the model level as "reasonable but different output on every run" while a
+// single fixed-shape unit test stays green. This test exercises exactly that path.
+// ==============================================================================
+TEST(prepare_buffer_fusing, in_place_crop_split_axis1_varbatch_multiiter_datacheck) {
+    auto& engine = get_test_engine();
+    tests::random_generator rg(GET_SUITE_NAME);
+
+    const int64_t H = 4, S = 8;
+
+    auto in_layout_dyn  = layout{ov::PartialShape{-1, 3, H, S}, data_types::f16, format::bfyx};
+    auto axis_mem       = engine.allocate_memory({{}, data_types::i64, format::bfyx});
+    auto splits_len_mem = engine.allocate_memory({{3}, data_types::i64, format::bfyx});
+    auto scale_mem      = engine.allocate_memory({{1}, data_types::f16, format::bfyx});
+    set_values<int64_t>(axis_mem, {1});
+    set_values<int64_t>(splits_len_mem, {1, 1, 1});
+    set_values<ov::float16>(scale_mem, {ov::float16(1.f)});
+
+    const auto op_mode = cldnn::crop_ngraph_op_mode::variadic_split;
+    const int64_t axis = 1;
+    auto rs_shape_dyn = ov::PartialShape{-1, H, S};
+
+    topology topo_dyn(
+        input_layout("input", in_layout_dyn),
+        data("axis",       axis_mem),
+        data("splits_len", splits_len_mem),
+        data("scale",      scale_mem),
+        crop("crop0", {input_info("input"), input_info("axis"), input_info("splits_len")},
+             cldnn::tensor(1), cldnn::tensor(0), op_mode, 0, axis),
+        reshape("reshape0", input_info("crop0"), false, std::vector<int64_t>{-1, H, S}, rs_shape_dyn, cldnn::reshape::reshape_mode::base),
+        eltwise("eltwise0", {input_info("reshape0"), input_info("scale")}, eltwise_mode::prod),
+        reorder("out0", input_info("eltwise0"), format::bfyx, data_types::f16),
+        crop("crop1", {input_info("input"), input_info("axis"), input_info("splits_len")},
+             cldnn::tensor(1), cldnn::tensor(0), op_mode, 1, axis),
+        reshape("reshape1", input_info("crop1"), false, std::vector<int64_t>{-1, H, S}, rs_shape_dyn, cldnn::reshape::reshape_mode::base),
+        eltwise("eltwise1", {input_info("reshape1"), input_info("scale")}, eltwise_mode::prod),
+        reorder("out1", input_info("eltwise1"), format::bfyx, data_types::f16),
+        crop("crop2", {input_info("input"), input_info("axis"), input_info("splits_len")},
+             cldnn::tensor(1), cldnn::tensor(0), op_mode, 2, axis),
+        reshape("reshape2", input_info("crop2"), false, std::vector<int64_t>{-1, H, S}, rs_shape_dyn, cldnn::reshape::reshape_mode::base),
+        eltwise("eltwise2", {input_info("reshape2"), input_info("scale")}, eltwise_mode::prod),
+        reorder("out2", input_info("eltwise2"), format::bfyx, data_types::f16)
+    );
+
+    ExecutionConfig config_dyn = get_test_default_config(engine);
+    config_dyn.set_property(ov::intel_gpu::allow_new_shape_infer(true));
+    config_dyn.set_property(ov::intel_gpu::optimize_data(true));
+
+    // Build the network ONCE and reuse it across iterations (as the model does).
+    network net(engine, topo_dyn, config_dyn);
+
+    // prefill (16) then decode (1), with shrink/grow transitions that force the
+    // crop padding to be recomputed for a different batch each time.
+    const std::vector<int64_t> batches = {16, 1, 8, 1, 1, 32, 2, 1, 7};
+
+    for (size_t it = 0; it < batches.size(); ++it) {
+        const int64_t L = batches[it];
+        auto input_mem = engine.allocate_memory({{L, 3, H, S}, data_types::f16, format::bfyx});
+        // Distinct data per iteration so stale reads from a previous iteration
+        // cannot accidentally match.
+        auto input_data = rg.generate_random_1d<ov::float16>(L * 3 * H * S,
+                                                             -1.f + 0.01f * static_cast<float>(it),
+                                                              1.f - 0.01f * static_cast<float>(it));
+        set_values(input_mem, input_data);
+        net.set_input_data("input", input_mem);
+
+        std::map<cldnn::primitive_id, cldnn::network_output> outputs;
+        OV_ASSERT_NO_THROW(outputs = net.execute());
+
+        // Record (do not abort on) the optimization decision so the per-element
+        // data check below runs for every iteration regardless of whether the
+        // in-place crop fired or fell back to a copy. Either way the DATA must be
+        // correct; aborting here would hide a cross-iteration data corruption.
+        const bool opt0 = net.get_primitive("crop0")->can_be_optimized();
+        const bool opt1 = net.get_primitive("crop1")->can_be_optimized();
+        const bool opt2 = net.get_primitive("crop2")->can_be_optimized();
+        std::cerr << "[VARBATCH] iter=" << it << " L=" << L
+                  << " opt(crop0,1,2)=" << opt0 << "," << opt1 << "," << opt2 << std::endl;
+
+        cldnn::mem_lock<ov::float16> in_ptr(input_mem, get_test_stream());
+        for (int64_t k = 0; k < 3; k++) {
+            auto out_mem = outputs.at("out" + std::to_string(k)).get_memory();
+            ASSERT_NE(out_mem, nullptr) << "iter=" << it << " k=" << k;
+            cldnn::mem_lock<ov::float16> out_ptr(out_mem, get_test_stream());
+            for (int64_t l = 0; l < L; l++)
+                for (int64_t h = 0; h < H; h++)
+                    for (int64_t s = 0; s < S; s++)
+                        ASSERT_EQ(out_ptr[(l * H + h) * S + s],
+                                  in_ptr[((l * 3 + k) * H + h) * S + s])
+                            << "iter=" << it << " L=" << L << " k=" << k
+                            << " l=" << l << " h=" << h << " s=" << s;
+        }
+    }
+}

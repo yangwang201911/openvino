@@ -1974,6 +1974,23 @@ void primitive_inst::do_runtime_in_place_crop() {
                 u->_impl_params->output_layouts[0] = crop_layout;
                 u->set_can_be_optimized(true);
                 GPU_DEBUG_TRACE_DETAIL << "[In place crop] " << u->id() << ": can_be_optimized " << std::endl;
+                // [DBG-CROP] Temporary diagnostic for the variable-batch non-determinism. Prints
+                // per-iteration: crop id, crop output batch, feature-axis lower offset, and (if a
+                // reshape user exists) the reshape output lower padding that downstream consumers
+                // (vl_sdpa token_offset / generic kernels) rely on. Not for commit.
+                {
+                    const auto& dbg_crop_l = u->_impl_params->get_output_layout();
+                    std::cout << "[DBG-CROP] crop=" << u->id()
+                              << " crop_out=" << dbg_crop_l.to_short_string()
+                              << " in_offset0=" << offsets.feature[0]
+                              << " crop_axis=" << crop_axis;
+                    if (user_info.first) {
+                        std::cout << " reshape_out=" << user_info.second.to_short_string();
+                    } else {
+                        std::cout << " reshape_user=none";
+                    }
+                    std::cout << std::endl;
+                }
             }
         }
     }

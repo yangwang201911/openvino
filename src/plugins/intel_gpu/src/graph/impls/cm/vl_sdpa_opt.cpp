@@ -175,6 +175,21 @@ protected:
                                       static_cast<int32_t>(query_shape[query_shape.size() - 3]) *
                                       static_cast<int32_t>(query_shape[query_shape.size() - 1]);
 
+            // [DBG-VLSDPA] Temporary diagnostic for the variable-batch non-determinism on the
+            // TransposeSplitMatcher in-place crop path. Not for commit.
+            {
+                const size_t dbg_seq_len = query_shape.size() >= 2 ? query_shape[query_shape.size() - 2] : 0;
+                std::cout << "[DBG-VLSDPA] seq_len(tokens)=" << dbg_seq_len
+                          << " num_q_heads=" << query_shape[query_shape.size() - 3]
+                          << " head_size=" << query_shape[query_shape.size() - 1]
+                          << " q_lower_pad[1]=" << q_pad._lower_size[1]
+                          << " kv_lower_pad[1]=" << kv_pad._lower_size[1]
+                          << " token_offset_q=" << token_offset_q
+                          << " token_offset_kv=" << token_offset_kv
+                          << " wg_count=" << wg_count << " wg_size=" << wg_size
+                          << std::endl;
+            }
+
             std::vector<int32_t> scalars{need_wg_mapping, token_offset_q, token_offset_kv};
             kd.params.scalars.clear();
             for (auto i : scalars) {
