@@ -2553,3 +2553,198 @@ TEST(prepare_buffer_fusing, in_place_crop_split_axis1_rank3_datacheck) {
                         << "k=" << k << " l=" << l << " h=" << h << " s=" << s;
     }
 }
+
+// ==============================================================================
+// Q/K-path data check: crop(axis=1, size=1) -> squeeze reshape -> NON-identity
+// RoPE-style eltwise (per-position cos multiply), then verify every element.
+//
+// Rationale: in the real Qwen-VL graph, the Q and K crops do NOT feed vl_sdpa
+// directly. Their reshape output feeds a RoPE Multiply (a generic eltwise/OCL
+// consumer), and only V feeds vl_sdpa. is_runtime_propagatable_padding() does
+// NOT gate the axis==1/size-1 squeeze branch on the consumer type, so the
+// along_feature in-place crop fires for the Q/K eltwise consumers as well.
+//
+// Unlike the *1.0 proxy, this test multiplies by a per-(h,s) cos tensor so the
+// consumer must read each element through the reshaped [L,H,S] view. If the
+// in-place path only encodes feature-axis padding (missing the per-batch
+// stride 3*H*S), batch>=1 reads the wrong source element and the product is
+// wrong. Expected: out_q[l,h,s] == in[l,0,h,s]*cos[h,s], out_k == in[l,1,h,s]*cos[h,s].
+// ==============================================================================
+TEST(prepare_buffer_fusing, in_place_crop_split_axis1_qk_rope_consumer_datacheck) {
+    auto& engine = get_test_engine();
+    tests::random_generator rg(GET_SUITE_NAME);
+
+    const int64_t H = 4, S = 8;
+    const int64_t L = 16;
+
+    auto in_layout      = layout{{L, 3, H, S}, data_types::f16, format::bfyx};
+    auto in_layout_dyn  = layout{ov::PartialShape{-1, 3, H, S}, data_types::f16, format::bfyx};
+    auto input_mem      = engine.allocate_memory(in_layout);
+    auto axis_mem       = engine.allocate_memory({{}, data_types::i64, format::bfyx});
+    auto splits_len_mem = engine.allocate_memory({{3}, data_types::i64, format::bfyx});
+    // Per-position cos tensor [1,H,S] broadcast over the batch dimension.
+    auto cos_mem        = engine.allocate_memory({{1, H, S}, data_types::f16, format::bfyx});
+
+    auto input_data = rg.generate_random_1d<ov::float16>(L * 3 * H * S, -1.f, 1.f);
+    auto cos_data   = rg.generate_random_1d<ov::float16>(H * S, 0.25f, 1.f);
+    set_values(input_mem, input_data);
+    set_values(cos_mem, cos_data);
+    set_values<int64_t>(axis_mem, {1});
+    set_values<int64_t>(splits_len_mem, {1, 1, 1});
+
+    auto op_mode = cldnn::crop_ngraph_op_mode::variadic_split;
+    const int64_t axis = 1;
+    auto rs_shape_dyn = ov::PartialShape{-1, H, S};
+
+    // Only the Q (slice 0) and K (slice 1) paths, each with a real RoPE-style
+    // multiply consumer.
+    topology topo_dyn(
+        input_layout("input", in_layout_dyn),
+        data("axis",       axis_mem),
+        data("splits_len", splits_len_mem),
+        data("cos",        cos_mem),
+        crop("crop0", {input_info("input"), input_info("axis"), input_info("splits_len")},
+             cldnn::tensor(1), cldnn::tensor(0), op_mode, 0, axis),
+        reshape("reshape0", input_info("crop0"), false, std::vector<int64_t>{-1, H, S}, rs_shape_dyn, cldnn::reshape::reshape_mode::base),
+        eltwise("rope_q", {input_info("reshape0"), input_info("cos")}, eltwise_mode::prod),
+        reorder("out0", input_info("rope_q"), format::bfyx, data_types::f16),
+        crop("crop1", {input_info("input"), input_info("axis"), input_info("splits_len")},
+             cldnn::tensor(1), cldnn::tensor(0), op_mode, 1, axis),
+        reshape("reshape1", input_info("crop1"), false, std::vector<int64_t>{-1, H, S}, rs_shape_dyn, cldnn::reshape::reshape_mode::base),
+        eltwise("rope_k", {input_info("reshape1"), input_info("cos")}, eltwise_mode::prod),
+        reorder("out1", input_info("rope_k"), format::bfyx, data_types::f16)
+    );
+    ExecutionConfig config_dyn = get_test_default_config(engine);
+    config_dyn.set_property(ov::intel_gpu::allow_new_shape_infer(true));
+    config_dyn.set_property(ov::intel_gpu::optimize_data(true));
+
+    auto prog = program::build_program(engine, topo_dyn, config_dyn, false, true);
+    ASSERT_NE(prog, nullptr);
+    ASSERT_TRUE(prog->get_node("reshape0").as<reshape>().is_runtime_propagatable_padding());
+    ASSERT_TRUE(prog->get_node("reshape1").as<reshape>().is_runtime_propagatable_padding());
+
+    network net(engine, topo_dyn, config_dyn);
+    net.set_input_data("input", input_mem);
+
+    ASSERT_TRUE(net.get_primitive("crop0")->can_be_optimized());
+    ASSERT_TRUE(net.get_primitive("crop1")->can_be_optimized());
+
+    std::map<cldnn::primitive_id, cldnn::network_output> outputs;
+    OV_ASSERT_NO_THROW(outputs = net.execute());
+
+    cldnn::mem_lock<ov::float16> in_ptr(input_mem, get_test_stream());
+    cldnn::mem_lock<ov::float16> cos_ptr(cos_mem, get_test_stream());
+    for (int64_t k = 0; k < 2; k++) {
+        auto out_mem = outputs.at("out" + std::to_string(k)).get_memory();
+        ASSERT_NE(out_mem, nullptr);
+        cldnn::mem_lock<ov::float16> out_ptr(out_mem, get_test_stream());
+        for (int64_t l = 0; l < L; l++)
+            for (int64_t h = 0; h < H; h++)
+                for (int64_t s = 0; s < S; s++) {
+                    const float expected = static_cast<float>(in_ptr[((l * 3 + k) * H + h) * S + s]) *
+                                           static_cast<float>(cos_ptr[h * S + s]);
+                    ASSERT_EQ(static_cast<float>(out_ptr[(l * H + h) * S + s]), expected)
+                        << "k=" << k << " l=" << l << " h=" << h << " s=" << s;
+                }
+    }
+}
+
+// ==============================================================================
+// NEGATIVE data check: the crop(axis=1, size=1) -> squeeze reshape pattern is
+// present, but the reshape feeds an mvn consumer. mvn canonicalizes input
+// strides and cannot tolerate dynamic padding offsets, so the in-place crop
+// optimization MUST be rejected for this consumer.
+//
+// This complements the positive *_datacheck tests: it asserts BOTH that
+//   (1) the fuse did NOT fire (is_runtime_propagatable_padding == false,
+//       can_be_optimized == false), AND
+//   (2) the copy-fallback path still produces correct data after execution.
+//
+// A flag-only negative test would pass even if the fallback path silently
+// extracted the wrong slice. Executing + comparing every element guards the
+// fallback as well. mvn here only subtracts the per-row mean (normalize_variance
+// = false) over the last axis, so the reference is:
+//   out_k[l,d] == in[l,k,d] - mean_d(in[l,k,:]).
+// ==============================================================================
+TEST(prepare_buffer_fusing, in_place_crop_split_axis1_mvn_blocked_datacheck) {
+    auto& engine = get_test_engine();
+    tests::random_generator rg(GET_SUITE_NAME);
+
+    const int64_t L = 16, D = 4;
+
+    auto in_layout_dyn  = layout{ov::PartialShape{-1, 3, D}, data_types::f16, format::bfyx};
+    auto input_mem      = engine.allocate_memory({{L, 3, D}, data_types::f16, format::bfyx});
+    auto axis_mem       = engine.allocate_memory({{}, data_types::i64, format::bfyx});
+    auto splits_len_mem = engine.allocate_memory({{3}, data_types::i64, format::bfyx});
+
+    auto input_data = rg.generate_random_1d<ov::float16>(L * 3 * D, -1.f, 1.f);
+    set_values(input_mem, input_data);
+    set_values<int64_t>(axis_mem, {1});
+    set_values<int64_t>(splits_len_mem, {1, 1, 1});
+
+    const auto op_mode = cldnn::crop_ngraph_op_mode::variadic_split;
+    const int64_t axis = 1;
+    auto rs_shape_dyn = ov::PartialShape{-1, D};
+
+    // Three Q/K/V slices, each followed by a squeeze reshape and an mvn consumer
+    // that blocks the in-place crop optimization.
+    topology topo(
+        input_layout("input", in_layout_dyn),
+        data("axis",       axis_mem),
+        data("splits_len", splits_len_mem),
+        crop("crop0", {input_info("input"), input_info("axis"), input_info("splits_len")},
+             cldnn::tensor(1), cldnn::tensor(0), op_mode, 0, axis),
+        reshape("reshape0", input_info("crop0"), false, std::vector<int64_t>{1}, rs_shape_dyn, cldnn::reshape::reshape_mode::squeeze),
+        mvn("mvn0", input_info("reshape0"), false, 1e-10f, false, {1}),
+        reorder("out0", input_info("mvn0"), format::bfyx, data_types::f16),
+        crop("crop1", {input_info("input"), input_info("axis"), input_info("splits_len")},
+             cldnn::tensor(1), cldnn::tensor(0), op_mode, 1, axis),
+        reshape("reshape1", input_info("crop1"), false, std::vector<int64_t>{1}, rs_shape_dyn, cldnn::reshape::reshape_mode::squeeze),
+        mvn("mvn1", input_info("reshape1"), false, 1e-10f, false, {1}),
+        reorder("out1", input_info("mvn1"), format::bfyx, data_types::f16),
+        crop("crop2", {input_info("input"), input_info("axis"), input_info("splits_len")},
+             cldnn::tensor(1), cldnn::tensor(0), op_mode, 2, axis),
+        reshape("reshape2", input_info("crop2"), false, std::vector<int64_t>{1}, rs_shape_dyn, cldnn::reshape::reshape_mode::squeeze),
+        mvn("mvn2", input_info("reshape2"), false, 1e-10f, false, {1}),
+        reorder("out2", input_info("mvn2"), format::bfyx, data_types::f16)
+    );
+
+    ExecutionConfig config = get_test_default_config(engine);
+    config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
+    config.set_property(ov::intel_gpu::optimize_data(true));
+
+    // (1) The fuse must be rejected: mvn consumer blocks runtime padding propagation.
+    auto prog = program::build_program(engine, topo, config, false, true);
+    ASSERT_NE(prog, nullptr);
+    ASSERT_FALSE(prog->get_node("reshape0").as<reshape>().is_runtime_propagatable_padding());
+    ASSERT_FALSE(prog->get_node("reshape1").as<reshape>().is_runtime_propagatable_padding());
+    ASSERT_FALSE(prog->get_node("reshape2").as<reshape>().is_runtime_propagatable_padding());
+
+    network net(engine, topo, config);
+    net.set_input_data("input", input_mem);
+    ASSERT_FALSE(net.get_primitive("crop0")->can_be_optimized());
+    ASSERT_FALSE(net.get_primitive("crop1")->can_be_optimized());
+    ASSERT_FALSE(net.get_primitive("crop2")->can_be_optimized());
+
+    // (2) The copy-fallback path must still produce correct data.
+    std::map<cldnn::primitive_id, cldnn::network_output> outputs;
+    OV_ASSERT_NO_THROW(outputs = net.execute());
+
+    cldnn::mem_lock<ov::float16> in_ptr(input_mem, get_test_stream());
+    for (int64_t k = 0; k < 3; k++) {
+        auto out_mem = outputs.at("out" + std::to_string(k)).get_memory();
+        ASSERT_NE(out_mem, nullptr);
+        cldnn::mem_lock<ov::float16> out_ptr(out_mem, get_test_stream());
+        for (int64_t l = 0; l < L; l++) {
+            float mean = 0.f;
+            for (int64_t d = 0; d < D; d++)
+                mean += static_cast<float>(in_ptr[(l * 3 + k) * D + d]);
+            mean /= static_cast<float>(D);
+            for (int64_t d = 0; d < D; d++) {
+                const float expected = static_cast<float>(in_ptr[(l * 3 + k) * D + d]) - mean;
+                ASSERT_NEAR(static_cast<float>(out_ptr[l * D + d]), expected, 0.01f)
+                    << "k=" << k << " l=" << l << " d=" << d;
+            }
+        }
+    }
+}
