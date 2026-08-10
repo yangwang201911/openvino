@@ -207,10 +207,17 @@ private:
 };
 
 void gear_changed_callback(const char* path, const char* event, void* context) {
-    LOG_INFO_TAG("TelemetryClient: received event from %s. Event data: %s", path, event);
+    if (event == nullptr) {
+        LOG_WARNING_TAG("TelemetryClient: received null event payload from %s", path != nullptr ? path : "<null>");
+        return;
+    }
+    LOG_DEBUG_TAG("TelemetryClient: received event from %s. Event data: %s",
+                  path != nullptr ? path : "<null>",
+                  event);
     try {
         const auto data = nlohmann::json::parse(event);
-        if (data.empty()) {
+        if (!data.is_object() || data.empty()) {
+            LOG_WARNING_TAG("TelemetryClient: gear-changed payload must be a non-empty JSON object");
             return;
         }
         const auto event_name = data.begin().key();

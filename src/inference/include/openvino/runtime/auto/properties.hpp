@@ -94,7 +94,8 @@ static constexpr Property<std::map<std::string, std::map<unsigned, float>>> perf
 /**
  * @brief Name of the device AUTO should prefer while the platform is in low power mode
  * (as reported by IPF/DTT). Takes precedence over perf_curve_table and
- * devices_utilization_threshold when the platform is in low power mode.
+ * devices_utilization_threshold when the platform is in low power mode. The value must exactly
+ * match a candidate DeviceInformation::device_name, for example "CPU", "NPU", or "GPU.0".
  * @ingroup ov_runtime_cpp_prop_api
  */
 static constexpr Property<std::string> low_power_device{"LOW_POWER_DEVICE"};
