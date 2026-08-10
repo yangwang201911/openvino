@@ -7,6 +7,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/stl/filesystem.h>
 
+#include <cmath>
 #include <map>
 #include <set>
 #include <string>
@@ -389,17 +390,41 @@ std::map<std::string, ov::Any> properties_to_any_map(const std::map<std::string,
                                        ov::intel_auto::perf_curve_table.name(),
                                        " should be dict[str, dict[int in [0, 100], float]] with integer inner keys");
                     }
-                    const auto utilization = py::cast<long long>(curve_item.first);
-                    if (utilization < 0 || utilization > 100) {
-                        OPENVINO_THROW("The key type of ",
+                    long long utilization = 0;
+                    try {
+                        utilization = py::cast<long long>(curve_item.first);
+                    } catch (const py::cast_error&) {
+                        // Rethrow as ov::Exception so out-of-range ints surface as a consistent RuntimeError.
+                        OPENVINO_THROW("The utilization key of ",
                                        ov::intel_auto::perf_curve_table.name(),
-                                       " should be dict[str, dict[int in [0, 100], float]]");
+                                       " must be an integer within [0, 100]");
                     }
-                    const auto score = py::cast<float>(curve_item.second);
-                    if (score < 0.f) {
+                    if (utilization < 0 || utilization > 100) {
+                        OPENVINO_THROW("The utilization key of ",
+                                       ov::intel_auto::perf_curve_table.name(),
+                                       " must be an integer within [0, 100], but got ",
+                                       utilization);
+                    }
+                    // bool is implicitly castable to float (True/False -> 1.0/0.0); reject it explicitly.
+                    if (py::isinstance<py::bool_>(curve_item.second)) {
                         OPENVINO_THROW("The value type of ",
                                        ov::intel_auto::perf_curve_table.name(),
-                                       " should be dict[str, dict[int in [0, 100], float]] with non-negative scores");
+                                       " should be dict[str, dict[int in [0, 100], float]] with float scores");
+                    }
+                    float score = 0.f;
+                    try {
+                        score = py::cast<float>(curve_item.second);
+                    } catch (const py::cast_error&) {
+                        // Rethrow as ov::Exception so invalid types surface as a consistent RuntimeError.
+                        OPENVINO_THROW("The value type of ",
+                                       ov::intel_auto::perf_curve_table.name(),
+                                       " should be dict[str, dict[int in [0, 100], float]] with numeric float scores");
+                    }
+                    if (!std::isfinite(score) || score < 0.f) {
+                        OPENVINO_THROW(
+                            "The value type of ",
+                            ov::intel_auto::perf_curve_table.name(),
+                            " should be dict[str, dict[int in [0, 100], float]] with non-negative finite scores");
                     }
                     curve[static_cast<unsigned>(utilization)] = score;
                 }

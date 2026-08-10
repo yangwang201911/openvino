@@ -480,7 +480,7 @@ public:
         std::tie(perfCurveTable, devices, deviceUtilization, selectedDeviceInfo) = obj.param;
         std::ostringstream result;
         result << "candidateDeviceList_";
-        for (auto dev : devices)
+        for (const auto& dev : devices)
             result << dev.device_name << "_priority_" << dev.device_priority << "_";
         result << "utilization_";
         for (const auto& item : deviceUtilization) {
@@ -505,7 +505,7 @@ public:
         return sanitize_for_gtest(result.str());
     }
 
-    void compare(DeviceInformation& a, DeviceInformation& b) {
+    void compare(const DeviceInformation& a, const DeviceInformation& b) {
         EXPECT_EQ(a.device_name, b.device_name);
         EXPECT_EQ(a.unique_name, b.unique_name);
         EXPECT_EQ(a.default_device_id, b.default_device_id);
@@ -541,6 +541,8 @@ TEST_P(SelectDeviceWithPerfCurveTableTest, selectDeviceWithPerfCurveTable) {
     std::string netPrecision = "FP32";
     auto result = plugin->select_device(devices, netPrecision, 0, {}, perfCurveTable, {});
     compare(result, selectedDeviceInfo);
+    // m_priority_map is process-wide static state; clean up to avoid leaking into other suites.
+    plugin->unregister_priority(0, result.unique_name);
 }
 
 const std::vector<ConfigPerfCurveParams> testPerfCurveConfigs = {
@@ -577,7 +579,7 @@ const std::vector<ConfigPerfCurveParams> testPerfCurveConfigs = {
                           {{"CPU", 10.f}, {"NPU", 70.f}},
                           {"NPU", {}, -1, "01", "NPU_01", 0}},
     // 7. No curve entry matches any device; falls back to priority order.
-    ConfigPerfCurveParams{{{"OTHERS", {{0, 0.f}, {100, 100.f}}}},
+    ConfigPerfCurveParams{{{"iGPU", {{0, 0.f}, {100, 100.f}}}},
                           {{"CPU", {}, -1, "01", "CPU_01", 1}, {"NPU", {}, -1, "01", "NPU_01", 2}},
                           {{"CPU", 50.f}, {"NPU", 10.f}},
                           {"CPU", {}, -1, "01", "CPU_01", 1}},

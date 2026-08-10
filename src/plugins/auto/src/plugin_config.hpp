@@ -10,6 +10,8 @@
 #include "utils/log.hpp"
 #include "utils/log_util.hpp"
 #include "openvino/runtime/device_id_parser.hpp"
+#include <algorithm>
+#include <cmath>
 #include <string>
 #include <map>
 #include <set>
@@ -86,8 +88,11 @@ public:
                 if (allowed_devices.find(device) == allowed_devices.end()) {
                     return false;
                 }
+                if (curve.empty()) {
+                    return false;
+                }
                 for (const auto& [utilization, score] : curve) {
-                    if (utilization > 100 || score < 0.f) {
+                    if (utilization > 100 || score < 0.f || !std::isfinite(score)) {
                         return false;
                     }
                 }

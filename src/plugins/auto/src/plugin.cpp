@@ -5,6 +5,8 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 #include "plugin.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <map>
 #include <memory>
 #include <string>
@@ -756,7 +758,10 @@ DeviceInformation Plugin::select_device(const std::vector<DeviceInformation>& me
     } else if (!perf_curve_table.empty()) {
         // perf_curve_table takes precedence over devices_utilization_threshold when set.
         perf_curve_sorted_devices = sort_device_by_perf_curve(valid_devices, perf_curve_table);
-        ptr_select_device = &perf_curve_sorted_devices.front();
+        // sort_device_by_perf_curve is mockable/overridable; fall back to the highest-priority valid device
+        // if it returns an empty list to avoid dereferencing front() on an empty container.
+        ptr_select_device =
+            perf_curve_sorted_devices.empty() ? &valid_devices.front() : &perf_curve_sorted_devices.front();
     } else {
         // select the higher priority device in case all of device utilization is exceeded the threshold.
         last_device = valid_devices.front();
@@ -832,6 +837,12 @@ DeviceInformation Plugin::select_device(const std::vector<DeviceInformation>& me
 }
 
 float Plugin::interpolate_perf_score(const std::map<unsigned, float>& curve, float utilization) {
+    if (curve.empty()) {
+        OPENVINO_THROW("perf_curve_table contains an empty curve; cannot compute performance score");
+    }
+    if (!std::isfinite(utilization)) {
+        OPENVINO_THROW("Device utilization is not a finite value; cannot compute performance score");
+    }
     const float min_key = static_cast<float>(curve.begin()->first);
     const float max_key = static_cast<float>(curve.rbegin()->first);
     if (utilization < min_key || utilization > max_key) {
@@ -843,10 +854,7 @@ float Plugin::interpolate_perf_score(const std::map<unsigned, float>& curve, flo
                        max_key,
                        "]");
     }
-    auto hi_it = curve.begin();
-    while (hi_it != curve.end() && static_cast<float>(hi_it->first) < utilization) {
-        ++hi_it;
-    }
+    auto hi_it = curve.lower_bound(static_cast<unsigned>(std::ceil(utilization)));
     if (static_cast<float>(hi_it->first) == utilization) {
         return hi_it->second;
     }
@@ -869,19 +877,24 @@ std::list<DeviceInformation> Plugin::sort_device_by_perf_curve(
         std::string device_type;
         bool resolved = true;
         if (lookup_key == "GPU") {
-            try {
-                device_type =
-                    get_core()->get_property(device.device_name, ov::device::type.name(), {}).as<std::string>();
-            } catch (const ov::Exception&) {
+            // Skip the ov::device::type query when the table has no GPU curves; the device stays unscored anyway.
+            if (perf_curve_table.count("iGPU") == 0 && perf_curve_table.count("dGPU") == 0) {
                 resolved = false;
-            }
-            if (resolved) {
-                if (device_type == "integrated") {
-                    lookup_key = "iGPU";
-                } else if (device_type == "discrete") {
-                    lookup_key = "dGPU";
-                } else {
+            } else {
+                try {
+                    device_type =
+                        get_core()->get_property(device.device_name, ov::device::type.name(), {}).as<std::string>();
+                } catch (const ov::Exception&) {
                     resolved = false;
+                }
+                if (resolved) {
+                    if (device_type == "integrated") {
+                        lookup_key = "iGPU";
+                    } else if (device_type == "discrete") {
+                        lookup_key = "dGPU";
+                    } else {
+                        resolved = false;
+                    }
                 }
             }
         }
@@ -906,11 +919,8 @@ std::list<DeviceInformation> Plugin::sort_device_by_perf_curve(
         scored.emplace_back(device, score);
     }
     // Devices with a score are kept ahead of devices without one, both groups keep their original relative order.
-    std::stable_partition(scored.begin(), scored.end(), [](const auto& item) {
+    const auto boundary = std::stable_partition(scored.begin(), scored.end(), [](const auto& item) {
         return item.second.has_value();
-    });
-    const auto boundary = std::find_if(scored.begin(), scored.end(), [](const auto& item) {
-        return !item.second.has_value();
     });
     std::stable_sort(scored.begin(), boundary, [](const auto& a, const auto& b) {
         return a.second.value() < b.second.value();

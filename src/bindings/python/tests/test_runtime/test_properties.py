@@ -615,6 +615,38 @@ def test_properties_devices_utilization_threshold():
     assert "incompatible function arguments" in str(e.value)
 
 
+def test_properties_perf_curve_table():
+    # Assert the property name is correctly registered
+    assert intel_auto.perf_curve_table == "PERF_CURVE_TABLE"
+
+    def check(value1, value2):
+        ret = intel_auto.perf_curve_table(value1)
+        assert ret[0] == "PERF_CURVE_TABLE"
+        assert ret[1].value == value2
+
+    # Nested dict form: device -> {utilization: score}
+    check({"CPU": {0: 0.0, 100: 100.0}}, {"CPU": {0: 0.0, 100: 100.0}})
+    check({"CPU": {50: 25.5}, "NPU": {50: 40.0}},
+          {"CPU": {50: 25.5}, "NPU": {50: 40.0}})
+
+    # String form is accepted and parsed to the same nested map.
+    check("{CPU:{0:0,100:100}}", {"CPU": {0: 0.0, 100: 100.0}})
+
+    # Dict inputs route through the same strict validation as Core.set_property, so lossy
+    # implicit conversions (bool keys/values) and invalid types are rejected consistently.
+    with pytest.raises(RuntimeError):
+        intel_auto.perf_curve_table({"CPU": {0: "high"}})
+
+    with pytest.raises(RuntimeError):
+        intel_auto.perf_curve_table({23: {0: 1.0}})
+
+    with pytest.raises(RuntimeError):
+        intel_auto.perf_curve_table({"CPU": {True: 1.0}})
+
+    with pytest.raises(RuntimeError):
+        intel_auto.perf_curve_table({"CPU": {0: True}})
+
+
 def test_properties_streams():
     # Test extra Num class
     assert streams.Num().to_integer() == -1
