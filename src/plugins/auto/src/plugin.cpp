@@ -741,13 +741,16 @@ DeviceInformation Plugin::select_device(const std::vector<DeviceInformation>& me
     // low_power_device (driven by IPF/DTT OnEpoGearChanged) takes precedence over perf_curve_table
     // and devices_utilization_threshold whenever the platform is in low power mode.
     auto find_low_power_device = [&]() -> DeviceInformation* {
-        if (low_power_device.empty() || !get_low_power_mode().value_or(false)) {
+        if (low_power_device.empty()) {
             return nullptr;
         }
         auto it = std::find_if(valid_devices.begin(), valid_devices.end(), [&](const DeviceInformation& device) {
             return device.device_name == low_power_device;
         });
-        return it != valid_devices.end() ? &(*it) : nullptr;
+        if (it == valid_devices.end() || !get_low_power_mode().value_or(false)) {
+            return nullptr;
+        }
+        return &(*it);
     };
     if (valid_devices.empty()) {
         // after remove higher priority device,but the available devices is null,
