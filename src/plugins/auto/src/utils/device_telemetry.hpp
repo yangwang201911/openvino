@@ -15,6 +15,8 @@ namespace ov {
 namespace auto_plugin {
 namespace device_monitor {
 
+void gear_changed_callback(const char* path, const char* event, void* context);
+
 class TelemetryClient {
 public:
     TelemetryClient();
@@ -27,6 +29,7 @@ public:
     std::optional<bool> is_low_power_mode();
 
 private:
+    friend void gear_changed_callback(const char* path, const char* event, void* context);
     class Impl;
     std::unique_ptr<Impl> m_impl;
 };
