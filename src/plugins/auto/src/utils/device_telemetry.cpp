@@ -122,17 +122,17 @@ public:
         if (m_handle == nullptr) {
             return std::nullopt;
         }
-        if (m_current_gear.load() < 0) {
+        const int gear = m_current_gear.load();
+        if (gear < 0) {
             return std::nullopt;
         }
-        return m_is_low_power_mode.load();
+        return is_low_power_gear(gear);
     }
 
     void on_gear_changed(const std::string& gear_str) {
         try {
             const int gear = std::stoi(gear_str);
             m_current_gear = gear;
-            m_is_low_power_mode = is_low_power_gear(gear);
         } catch (const std::exception&) {
             LOG_WARNING_TAG("TelemetryClient: EPO gear value is not an integer: %s", gear_str.c_str());
         }
@@ -202,7 +202,6 @@ private:
 
     void* m_handle = nullptr;
     bool m_gear_event_registered = false;
-    std::atomic<bool> m_is_low_power_mode{false};
     std::atomic<int> m_current_gear{-1};
 };
 
