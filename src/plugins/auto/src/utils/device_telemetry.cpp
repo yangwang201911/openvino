@@ -35,6 +35,12 @@ void gear_changed_callback(const char* path, const char* event, void* context);
 // Calls into ClientApi.dll through the plain-C ABI (ClientApiC.h).
 class TelemetryClient::Impl {
 public:
+    static void handle_gear_changed_event(void* context, const std::string& gear_str) {
+        if (context != nullptr) {
+            static_cast<Impl*>(context)->on_gear_changed(gear_str);
+        }
+    }
+
     Impl() {
         const ipf_err_t status = IpfCreate(nullptr, &m_handle);
         if (status != IpfError::IPF_ERR_OK) {
@@ -58,7 +64,9 @@ public:
 
     ~Impl() {
         if (m_handle != nullptr) {
-            IpfUnregisterEvent(m_handle, k_dtt_gear_changed_path, gear_changed_callback);
+            if (m_gear_event_registered) {
+                IpfUnregisterEvent(m_handle, k_dtt_gear_changed_path, gear_changed_callback);
+            }
             IpfDestroy(m_handle);
             m_handle = nullptr;
         }
@@ -209,9 +217,7 @@ void gear_changed_callback(const char* path, const char* event, void* context) {
         const auto& event_value = data.begin().value();
         const std::string gear_str = event_value.is_string() ? event_value.get<std::string>() : event_value.dump();
         LOG_INFO_TAG("TelemetryClient: event name=%s, EPO gear=%s", event_name.c_str(), gear_str.c_str());
-        if (context != nullptr) {
-            static_cast<TelemetryClient::Impl*>(context)->on_gear_changed(gear_str);
-        }
+        TelemetryClient::Impl::handle_gear_changed_event(context, gear_str);
     } catch (const nlohmann::json::exception& e) {
         LOG_WARNING_TAG("TelemetryClient: failed to parse gear-changed event data: %s", e.what());
     }
