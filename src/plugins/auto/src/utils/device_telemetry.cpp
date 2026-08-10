@@ -111,20 +111,20 @@ public:
     }
 
     std::optional<bool> is_low_power_mode() const {
-        if (m_handle == nullptr || !m_gear_event_registered) {
+        if (m_handle == nullptr) {
             return std::nullopt;
         }
-        // TODO: once the DTT team confirms which EPO gear value(s) mean low power mode,
-        // compare m_current_gear.load() against that threshold here instead of always
-        // returning the (currently never-set-true) placeholder below.
+        if (m_current_gear.load() < 0) {
+            return std::nullopt;
+        }
         return m_is_low_power_mode.load();
     }
 
-    // Records the latest EPO gear parsed from either the startup query or the
-    // OnEpoGearChanged event. Does not decide low-power mode yet; see is_low_power_mode().
     void on_gear_changed(const std::string& gear_str) {
         try {
-            m_current_gear = std::stoi(gear_str);
+            const int gear = std::stoi(gear_str);
+            m_current_gear = gear;
+            m_is_low_power_mode = is_low_power_gear(gear);
         } catch (const std::exception&) {
             LOG_WARNING_TAG("TelemetryClient: EPO gear value is not an integer: %s", gear_str.c_str());
         }
@@ -198,9 +198,6 @@ private:
     std::atomic<int> m_current_gear{-1};
 };
 
-// Parses the {"<EventName>": "<gear>"} payload confirmed by the DTT team (e.g.
-// {"OnEpoGearChanged": "2"}). The gear-to-low-power-mode mapping is not yet known, so this
-// only records/logs the raw gear value; see is_low_power_mode() for the pending TODO.
 void gear_changed_callback(const char* path, const char* event, void* context) {
     LOG_INFO_TAG("TelemetryClient: received event from %s. Event data: %s", path, event);
     try {

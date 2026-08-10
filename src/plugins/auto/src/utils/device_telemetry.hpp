@@ -35,6 +35,12 @@ inline constexpr std::string_view k_cpu_utilization_metric = "CPUUtilization";
 inline constexpr std::string_view k_igpu_utilization_metric = "IGPUUtilization";
 inline constexpr std::string_view k_dgpu_utilization_metric = "DGPUUtilization";
 inline constexpr std::string_view k_npu_utilization_metric = "NPUUtilization";
+inline constexpr int k_low_power_mode_min_gear = 1;
+
+// EPO gear 0 is baseline; positive gears request reduced-power operation.
+inline constexpr bool is_low_power_gear(int gear) {
+    return gear >= k_low_power_mode_min_gear;
+}
 
 inline constexpr bool has_prefix(std::string_view value, std::string_view prefix) {
     return value.size() >= prefix.size() && value.compare(0, prefix.size(), prefix) == 0;

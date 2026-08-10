@@ -56,6 +56,13 @@ INSTANTIATE_TEST_SUITE_P(smoke_Auto_BehaviorTests,
                          ::testing::ValuesIn(deviceMonitorKeyConfigs),
                          DeviceMonitorKeyTest::getTestCaseName);
 
+TEST(DeviceMonitorTest, low_power_mode_gear_mapping_matches_expected_policy) {
+    EXPECT_FALSE(device_monitor::is_low_power_gear(-1));
+    EXPECT_FALSE(device_monitor::is_low_power_gear(0));
+    EXPECT_TRUE(device_monitor::is_low_power_gear(1));
+    EXPECT_TRUE(device_monitor::is_low_power_gear(2));
+}
+
 // TelemetryClient::utilization must never throw and must return a value within
 // [0.0, 100.0] when available, or std::nullopt otherwise. On builds without the
 // telemetry backend it consistently returns std::nullopt.
