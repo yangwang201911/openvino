@@ -683,7 +683,9 @@ public:
 
     void TearDown() override {
         // m_priority_map is process-wide static state; clean up to avoid leaking into other suites.
-        plugin->unregister_priority(0, selectedUniqueName);
+        if (!selectedUniqueName.empty()) {
+            plugin->unregister_priority(0, selectedUniqueName);
+        }
     }
 
 protected:
