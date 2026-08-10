@@ -918,7 +918,8 @@ std::list<DeviceInformation> Plugin::sort_device_by_perf_curve(
         }
         scored.emplace_back(device, score);
     }
-    // Devices with a score are kept ahead of devices without one, both groups keep their original relative order.
+    // Scored devices are partitioned ahead of unscored devices; scored ties and all unscored devices keep
+    // their original relative order.
     const auto boundary = std::stable_partition(scored.begin(), scored.end(), [](const auto& item) {
         return item.second.has_value();
     });
