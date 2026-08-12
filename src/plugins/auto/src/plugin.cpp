@@ -6,7 +6,6 @@
 #include "plugin.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <map>
 #include <memory>
 #include <string>
@@ -487,10 +486,6 @@ std::shared_ptr<ov::ICompiledModel> Plugin::compile_model_impl(const std::filesy
         auto_s_context->m_utilization_thresholds.insert(device_utilization_thresholds.begin(),
                                                         device_utilization_thresholds.end());
     }
-    auto perf_curve_table = load_config.get_property(ov::intel_auto::perf_curve_table);
-    if (!perf_curve_table.empty()) {
-        auto_s_context->m_perf_curve_table = perf_curve_table;
-    }
     auto low_power_device = load_config.get_property(ov::intel_auto::low_power_device);
     if (!low_power_device.empty()) {
         auto_s_context->m_low_power_device = low_power_device;
@@ -702,7 +697,6 @@ DeviceInformation Plugin::select_device(const std::vector<DeviceInformation>& me
                                         const std::string& model_precision,
                                         unsigned int priority,
                                         const std::unordered_map<std::string, unsigned>& utilization_thresholds,
-                                        const std::map<std::string, std::map<unsigned, float>>& perf_curve_table,
                                         const std::string& low_power_device) {
     OV_ITT_SCOPED_TASK(itt::domains::AutoPlugin, "Plugin::SelectDevice");
 
@@ -737,9 +731,8 @@ DeviceInformation Plugin::select_device(const std::vector<DeviceInformation>& me
     }
 
     DeviceInformation* ptr_select_device = nullptr;
-    std::list<DeviceInformation> perf_curve_sorted_devices;
-    // low_power_device (driven by IPF/DTT OnEpoGearChanged) takes precedence over perf_curve_table
-    // and devices_utilization_threshold whenever the platform is in low power mode.
+    // low_power_device (driven by IPF/DTT OnEpoGearChanged) takes precedence over
+    // devices_utilization_threshold whenever the platform is in low power mode.
     auto find_low_power_device = [&]() -> DeviceInformation* {
         if (low_power_device.empty()) {
             return nullptr;
@@ -758,13 +751,6 @@ DeviceInformation Plugin::select_device(const std::vector<DeviceInformation>& me
         ptr_select_device = &last_device;
     } else if (auto* low_power_selected = find_low_power_device()) {
         ptr_select_device = low_power_selected;
-    } else if (!perf_curve_table.empty()) {
-        // perf_curve_table takes precedence over devices_utilization_threshold when set.
-        perf_curve_sorted_devices = sort_device_by_perf_curve(valid_devices, perf_curve_table);
-        // sort_device_by_perf_curve is mockable/overridable; fall back to the highest-priority valid device
-        // if it returns an empty list to avoid dereferencing front() on an empty container.
-        ptr_select_device =
-            perf_curve_sorted_devices.empty() ? &valid_devices.front() : &perf_curve_sorted_devices.front();
     } else {
         // select the higher priority device in case all of device utilization is exceeded the threshold.
         last_device = valid_devices.front();
@@ -837,103 +823,6 @@ DeviceInformation Plugin::select_device(const std::vector<DeviceInformation>& me
     //recode the device priority
     register_priority(priority, ptr_select_device->unique_name);
     return *ptr_select_device;
-}
-
-float Plugin::interpolate_perf_score(const std::map<unsigned, float>& curve, float utilization) {
-    if (curve.empty()) {
-        OPENVINO_THROW("perf_curve_table contains an empty curve; cannot compute performance score");
-    }
-    if (!std::isfinite(utilization)) {
-        OPENVINO_THROW("Device utilization is not a finite value; cannot compute performance score");
-    }
-    const float min_key = static_cast<float>(curve.begin()->first);
-    const float max_key = static_cast<float>(curve.rbegin()->first);
-    if (utilization < min_key || utilization > max_key) {
-        OPENVINO_THROW("Device utilization ",
-                       utilization,
-                       " is out of the perf_curve_table range [",
-                       min_key,
-                       ", ",
-                       max_key,
-                       "]");
-    }
-    auto hi_it = curve.lower_bound(static_cast<unsigned>(std::ceil(utilization)));
-    if (static_cast<float>(hi_it->first) == utilization) {
-        return hi_it->second;
-    }
-    auto lo_it = std::prev(hi_it);
-    const float lo_key = static_cast<float>(lo_it->first);
-    const float hi_key = static_cast<float>(hi_it->first);
-    const float ratio = (utilization - lo_key) / (hi_key - lo_key);
-    return lo_it->second + ratio * (hi_it->second - lo_it->second);
-}
-
-std::list<DeviceInformation> Plugin::sort_device_by_perf_curve(
-        const std::list<DeviceInformation>& valid_devices,
-        const std::map<std::string, std::map<unsigned, float>>& perf_curve_table) {
-    std::vector<std::pair<DeviceInformation, std::optional<float>>> scored;
-    scored.reserve(valid_devices.size());
-    for (const auto& device : valid_devices) {
-        std::optional<float> score;
-        ov::DeviceIDParser parsed{device.device_name};
-        std::string lookup_key = parsed.get_device_name();
-        std::string device_type;
-        bool resolved = true;
-        if (lookup_key == "GPU") {
-            // Skip the ov::device::type query when the table has no GPU curves; the device stays unscored anyway.
-            if (perf_curve_table.count("iGPU") == 0 && perf_curve_table.count("dGPU") == 0) {
-                resolved = false;
-            } else {
-                try {
-                    device_type =
-                        get_core()->get_property(device.device_name, ov::device::type.name(), {}).as<std::string>();
-                } catch (const ov::Exception&) {
-                    resolved = false;
-                }
-                if (resolved) {
-                    if (device_type == "integrated") {
-                        lookup_key = "iGPU";
-                    } else if (device_type == "discrete") {
-                        lookup_key = "dGPU";
-                    } else {
-                        resolved = false;
-                    }
-                }
-            }
-        }
-        if (resolved) {
-            const auto curve_it = perf_curve_table.find(lookup_key);
-            if (curve_it != perf_curve_table.end()) {
-                const auto utilization = get_device_utilization(device.device_name, device_type);
-                if (!utilization.has_value()) {
-                    LOG_DEBUG_TAG("Cannot get utilization for %s via perf_curve_table lookup",
-                                  device.device_name.c_str());
-                } else {
-                    try {
-                        score = interpolate_perf_score(curve_it->second, utilization.value());
-                    } catch (const ov::Exception& ex) {
-                        LOG_DEBUG_TAG("[%s] perf_curve_table score computation failed: %s. Treat as no-score",
-                                      device.device_name.c_str(),
-                                      ex.what());
-                    }
-                }
-            }
-        }
-        scored.emplace_back(device, score);
-    }
-    // Scored devices are partitioned ahead of unscored devices; scored ties and all unscored devices keep
-    // their original relative order.
-    const auto boundary = std::stable_partition(scored.begin(), scored.end(), [](const auto& item) {
-        return item.second.has_value();
-    });
-    std::stable_sort(scored.begin(), boundary, [](const auto& a, const auto& b) {
-        return a.second.value() < b.second.value();
-    });
-    std::list<DeviceInformation> result;
-    for (auto& item : scored) {
-        result.push_back(std::move(item.first));
-    }
-    return result;
 }
 
 

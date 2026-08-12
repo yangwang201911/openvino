@@ -15,7 +15,9 @@ namespace ov {
 namespace auto_plugin {
 namespace device_monitor {
 
+#ifdef OV_AUTO_ENABLE_IPF
 void gear_changed_callback(const char* path, const char* event, void* context);
+#endif
 
 class TelemetryClient {
 public:
@@ -26,10 +28,13 @@ public:
 
     // Whether the platform is currently in low power mode, based on startup CurrentGear state and
     // any later IPF/DTT OnEpoGearChanged notifications. std::nullopt means the mode is unknown.
+    // Lazy-initializes DTT version/gear queries and event registration on first call.
     std::optional<bool> is_low_power_mode();
 
 private:
+#ifdef OV_AUTO_ENABLE_IPF
     friend void gear_changed_callback(const char* path, const char* event, void* context);
+#endif
     class Impl;
     std::unique_ptr<Impl> m_impl;
 };

@@ -38,13 +38,7 @@ public:
                  const std::string&,
                  unsigned int,
                  (const std::unordered_map<std::string, unsigned>&),
-                 (const std::map<std::string, std::map<unsigned, float>>&),
                  const std::string&),
-                (override));
-    MOCK_METHOD((std::list<DeviceInformation>),
-                sort_device_by_perf_curve,
-                ((const std::list<DeviceInformation>&),
-                 (const std::map<std::string, std::map<unsigned, float>>&)),
                 (override));
     MOCK_METHOD((std::vector<DeviceInformation>),
                 parse_meta_devices,

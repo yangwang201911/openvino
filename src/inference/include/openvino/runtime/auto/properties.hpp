@@ -83,19 +83,12 @@ static constexpr Property<std::map<std::string, unsigned>> devices_utilization_t
     "DEVICES_UTILIZATION_THRESHOLD"};
 
 /**
- * @brief Per-device performance curve table mapping utilization percent to a relative performance score, used by
- * AUTO for device selection when set. A lower interpolated score indicates a more preferred device: AUTO ranks
- * candidates in ascending order of score and selects the one with the lowest score for the current utilization.
- * Device key must be one of "CPU", "iGPU", "dGPU", "NPU".
- * @ingroup ov_runtime_cpp_prop_api
- */
-static constexpr Property<std::map<std::string, std::map<unsigned, float>>> perf_curve_table{"PERF_CURVE_TABLE"};
-
-/**
  * @brief Name of the device AUTO should prefer while the platform is in low power mode
- * (as reported by IPF/DTT). Takes precedence over perf_curve_table and
+ * (as reported by IPF/DTT). Takes precedence over
  * devices_utilization_threshold when the platform is in low power mode. The value must exactly
  * match a candidate DeviceInformation::device_name, for example "CPU", "NPU", or "GPU.0".
+ * On builds without OV_AUTO_ENABLE_IPF, the telemetry backend always returns unknown, so this
+ * property has no effect.
  * @ingroup ov_runtime_cpp_prop_api
  */
 static constexpr Property<std::string> low_power_device{"LOW_POWER_DEVICE"};

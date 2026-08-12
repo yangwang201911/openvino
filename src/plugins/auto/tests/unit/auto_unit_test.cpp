@@ -122,15 +122,8 @@ ov::mock_auto_plugin::tests::BaseTest::BaseTest(const MODELTYPE modelType) {
                               const std::string& netPrecision,
                               unsigned int priority,
                               const std::unordered_map<std::string, unsigned>& utilization_thresholds,
-                              const std::map<std::string, std::map<unsigned, float>>& perf_curve_table,
                               const std::string& low_power_device) {
-            return plugin->Plugin::select_device(metaDevices, netPrecision, priority, utilization_thresholds, perf_curve_table, low_power_device);
-        });
-
-    ON_CALL(*plugin, sort_device_by_perf_curve)
-        .WillByDefault([this](const std::list<DeviceInformation>& validDevices,
-                              const std::map<std::string, std::map<unsigned, float>>& perfCurveTable) {
-            return plugin->Plugin::sort_device_by_perf_curve(validDevices, perfCurveTable);
+            return plugin->Plugin::select_device(metaDevices, netPrecision, priority, utilization_thresholds, low_power_device);
         });
 
     ON_CALL(*plugin, get_valid_device)

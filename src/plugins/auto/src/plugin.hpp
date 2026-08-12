@@ -62,11 +62,7 @@ public:
                   const std::string& model_precision = "FP32",
                   unsigned int priority = 0,
                   const std::unordered_map<std::string, unsigned>& utilization_thresholds = {},
-                  const std::map<std::string, std::map<unsigned, float>>& perf_curve_table = {},
                   const std::string& low_power_device = {});
-    MOCKTESTMACRO std::list<DeviceInformation> sort_device_by_perf_curve(
-        const std::list<DeviceInformation>& valid_devices,
-        const std::map<std::string, std::map<unsigned, float>>& perf_curve_table);
     void unregister_priority(const unsigned int& priority, const std::string& device_name);
     void register_priority(const unsigned int& priority, const std::string& device_name);
 
@@ -105,7 +101,6 @@ private:
                                                           const std::shared_ptr<const ov::Model>& model,
                                                           PluginConfig& load_config) const;
     std::string get_log_tag() const noexcept;
-    static float interpolate_perf_score(const std::map<unsigned, float>& curve, float utilization);
     static std::shared_ptr<std::mutex> m_mtx;
     static std::shared_ptr<std::map<unsigned int, std::list<std::string>>> m_priority_map;
     PluginConfig m_plugin_config;
