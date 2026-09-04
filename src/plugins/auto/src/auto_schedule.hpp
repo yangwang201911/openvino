@@ -46,6 +46,10 @@ private:
      * @note device is updated in place when the compilation falls back to another candidate device.
      */
     bool ensure_device_ready(DeviceInformation& device);
+    // Compile the model to the remaining candidate devices (excluding CPU and the actual
+    // device) purely to populate the cache blobs, then release the compiled models.
+    void compile_for_all_other_devices_for_cache();
+    std::shared_ptr<ov::threading::IStreamsExecutor>                     m_precompile_executor;
     size_t                                                               m_cpuhelp_infer_count = 0;
     double                                                               m_cpuhelp_fps = 0.0;
     mutable std::once_flag                                               m_oc;
